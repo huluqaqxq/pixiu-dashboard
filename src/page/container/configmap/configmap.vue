@@ -1,7 +1,7 @@
 <template>
   <el-card class="title-card-container">
     <div class="font-container">ConfigMap</div>
-    <PiXiuYaml></PiXiuYaml>
+    <PiXiuYaml :refresh="getConfigMaps"></PiXiuYaml>
   </el-card>
 
   <div style="margin-top: 25px">
@@ -37,7 +37,7 @@
     <el-card class="box-card">
       <el-table
         v-loading="data.loading"
-        :data="data.configMapsList"
+        :data="data.tableData"
         stripe
         style="margin-top: 2px; width: 100%"
         header-row-class-name="pixiu-table-header"
@@ -98,7 +98,7 @@
               type="text"
               size="small"
               style="margin-right: 1px; color: #006eff"
-              @click="handleEditConfigmapYamlDialog(scope.row)"
+              @click="handleEditYamlDialog(scope.row)"
             >
               编辑yaml
             </el-button>
@@ -107,7 +107,7 @@
               type="text"
               size="small"
               style="margin-right: 1px; margin-left: -2px; color: #006eff"
-              @click="deleteConfigMap(scope.row)"
+              @click="handleDeleteDialog(scope.row)"
             >
               删除
             </el-button>
@@ -119,25 +119,24 @@
         </template>
       </el-table>
 
-      <el-pagination
-        v-model:currentPage="data.pageInfo.page"
-        v-model:page-size="data.pageInfo.page_size"
-        style="float: right; margin-right: 30px; margin-top: 20px; margin-bottom: 20px"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next, jumper"
-        :total="data.pageInfo.total"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
+      <pagination :total="data.pageInfo.total" @on-change="onChange"></pagination>
     </el-card>
+
+    <pixiuDialog
+      :close-event="data.deleteDialog.close"
+      :object-name="data.deleteDialog.objectName"
+      :delete-name="data.deleteDialog.deleteName"
+      @confirm="confirm"
+      @cancel="cancel"
+    ></pixiuDialog>
   </div>
 
   <el-dialog
-    :model-value="data.editConfigmapYamlDialog"
+    :model-value="data.editYamlDialog"
     style="color: #000000; font: 14px; margin-top: 50px"
     width="800px"
     center
-    @close="closeEditConfigmapYamlDialog"
+    @close="closeEditYamlDialog"
   >
     <template #header>
       <div style="text-align: left; font-weight: bold; padding-left: 5px">编辑yaml</div>
@@ -146,13 +145,8 @@
     <MyCodeMirror ref="editYaml" :yaml="data.yaml" :height="620"></MyCodeMirror>
     <template #footer>
       <span class="dialog-footer">
-        <el-button class="pixiu-small-cancel-button" @click="closeEditConfigmapYamlDialog"
-          >取消</el-button
-        >
-        <el-button
-          type="primary"
-          class="pixiu-small-confirm-button"
-          @click="confirmEditConfigmapYaml"
+        <el-button class="pixiu-small-cancel-button" @click="closeEditYamlDialog">取消</el-button>
+        <el-button type="primary" class="pixiu-small-confirm-button" @click="confirmEditYaml"
           >确认</el-button
         >
       </span>
@@ -164,10 +158,19 @@ import { useRouter } from 'vue-router';
 import { reactive, getCurrentInstance, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import useClipboard from 'vue-clipboard3';
-import { formatTimestamp } from '@/utils/utils';
 import jsYaml from 'js-yaml';
+import { formatTimestamp, getTableData } from '@/utils/utils';
 import MyCodeMirror from '@/components/codemirror/index.vue';
 import PiXiuYaml from '@/components/pixiuyaml/index.vue';
+import Pagination from '@/components/pagination/index.vue';
+import { getNamespaceNames } from '@/services/kubernetes/namespaceService';
+import {
+  getConfigmapList,
+  updateConfigMap,
+  getConfigMap,
+  deleteConfigMap,
+} from '@/services/kubernetes/configmapService';
+import pixiuDialog from '@/components/pixiuDialog/index.vue';
 
 const { proxy } = getCurrentInstance();
 const router = useRouter();
@@ -181,66 +184,81 @@ const data = reactive({
     query: '',
     total: 0,
   },
+  tableData: [],
   loading: false,
   yaml: '',
   yamlName: '',
   namespace: 'default',
   namespaces: [],
   configMapsList: [],
-  editConfigmapYamlDialog: false,
+  editYamlDialog: false,
   isShow: false,
   showTooltip: false, // 控制提示信息的显示状态，默认为隐藏
   showIcon: false, // 控制图标的显示状态，默认为隐藏
+
+  // 删除对象属性
+  deleteDialog: {
+    close: false,
+    objectName: 'ConfigMap',
+    deleteName: '',
+  },
 });
-
-const handleSizeChange = (newSize) => {
-  data.pageInfo.limit = newSize;
-  getConfigMaps();
-};
-
-const handleCurrentChange = (newPage) => {
-  data.pageInfo.page = newPage;
-  getConfigMaps();
-};
-
-const createConfigMap = () => {
-  const url = `/kubernetes/configmaps/createConfigMap?cluster=${data.cluster}&namespace=${data.namespace}`;
-  router.push(url);
-};
-
-const editConfigMap = (row) => {
-  const url = `/kubernetes/configmaps/editConfigMap?cluster=${data.cluster}&namespace=${data.namespace}&name=${row.metadata.name}`;
-  router.push(url);
-};
-
-const deleteConfigMap = (row) => {
-  ElMessageBox.confirm('此操作将永久删除 ConfigMap ' + row.metadata.name + ' . 是否继续?', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning',
-    draggable: true,
-  })
-    .then(async () => {
-      await proxy.$http({
-        method: 'delete',
-        url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/configmaps/${row.metadata.name}`,
-      });
-      ElMessage({
-        type: 'success',
-        message: '删除 ' + row.metadata.name + ' 成功',
-      });
-      await getConfigMaps();
-    })
-    .catch(() => {}); // 取消
-};
 
 onMounted(() => {
   data.cluster = proxy.$route.query.cluster;
   data.cloud = proxy.$route.query;
   data.path = proxy.$route.fullPath;
-  getNamespaceList();
+
+  getNamespaces();
   getConfigMaps();
 });
+
+const handleDeleteDialog = (row) => {
+  data.deleteDialog.close = true;
+  data.deleteDialog.deleteName = row.metadata.name;
+};
+
+const confirm = async () => {
+  const [result, err] = await deleteConfigMap(
+    data.cluster,
+    data.namespace,
+    data.deleteDialog.deleteName,
+  );
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  proxy.$message.success(`ConfigMap(${data.deleteDialog.deleteName}) 删除成功`);
+
+  clean();
+  await getConfigMaps();
+};
+
+const cancel = () => {
+  clean();
+};
+
+const clean = () => {
+  data.deleteDialog.close = false;
+  data.deleteDialog.deleteName = '';
+};
+
+const onChange = (v) => {
+  data.pageInfo.limit = v.limit;
+  data.pageInfo.page = v.page;
+
+  data.tableData = getTableData(data.pageInfo, data.configMapsList);
+};
+
+const createConfigMap = () => {
+  const url = `/configmaps/createConfigMap?cluster=${data.cluster}`;
+  router.push(url);
+};
+
+const editConfigMap = (row) => {
+  const url = `/configmaps/editConfigMap?cluster=${data.cluster}&name=${row.metadata.name}`;
+  router.push(url);
+};
 
 const jumpRoute = (row) => {
   router.push({
@@ -271,15 +289,17 @@ const copy = async (val) => {
 const getConfigMaps = async () => {
   data.loading = true;
   data.namespace = localStorage.getItem('namespace');
-  const res = await proxy.$http({
-    method: 'get',
-    url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/configmaps`,
-    data: data.pageInfo,
-  });
+  const [result, err] = await getConfigmapList(data.cluster, data.namespace);
+  data.loading = false;
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
 
   data.loading = false;
-  data.configMapsList = res.items;
+  data.configMapsList = result.items;
   data.pageInfo.total = data.configMapsList.length;
+  data.tableData = getTableData(data.pageInfo, data.configMapsList);
 };
 
 const changeNamespace = async (val) => {
@@ -288,52 +308,57 @@ const changeNamespace = async (val) => {
   getConfigMaps();
 };
 
-const getNamespaceList = async () => {
-  try {
-    const result = await proxy.$http({
-      method: 'get',
-      url: '/proxy/pixiu/' + data.cloud.cluster + '/api/v1/namespaces',
-    });
-
-    for (let item of result.items) {
-      data.namespaces.push(item.metadata.name);
-    }
-  } catch (error) {}
+const getNamespaces = async () => {
+  const [result, err] = await getNamespaceNames(data.cluster);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  data.namespaces = result;
 };
 
 const formatterTime = (row, column, cellValue) => {
   const time = formatTimestamp(cellValue);
-  return <div>{time}</div>;
+  return (
+    <el-tooltip effect="light" placement="top" content={time}>
+      <div class="pixiu-ellipsis-style">{time}</div>
+    </el-tooltip>
+  );
 };
 
-const handleEditConfigmapYamlDialog = (row) => {
-  data.yaml = jsYaml.dump(row);
+const handleEditYamlDialog = async (row) => {
   data.yamlName = row.metadata.name;
-  data.editConfigmapYamlDialog = true;
-};
-
-const closeEditConfigmapYamlDialog = () => {
-  data.editConfigmapYamlDialog = false;
-  data.yaml = '';
-};
-
-const confirmEditConfigmapYaml = async () => {
-  let yamlValue = jsYaml.load(editYaml.value.code);
-  try {
-    const res = await proxy.$http({
-      method: 'put',
-      url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/configmaps/${data.yamlName}`,
-      data: yamlValue,
-    });
-  } catch (error) {
-    proxy.$message.success(`configmap ${data.yamlName} 更新失败`);
+  const [result, err] = await getConfigMap(data.cluster, data.namespace, data.yamlName);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
   }
-  data.editConfigmapYamlDialog = false;
+
+  data.yaml = jsYaml.dump(result);
+  data.editYamlDialog = true;
+};
+
+const closeEditYamlDialog = () => {
+  data.editYamlDialog = false;
   data.yaml = '';
   data.yamlName = '';
-  proxy.$message.success(`configmap ${data.yamlName} 更新成功`);
+};
 
-  getConfigMaps();
+const confirmEditYaml = async () => {
+  const yamlData = jsYaml.load(editYaml.value.code);
+  const [result, err] = await updateConfigMap(
+    data.cluster,
+    data.namespace,
+    data.yamlName,
+    yamlData,
+  );
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  proxy.$message.success(`Configmap(${data.yamlName}) YAML 更新成功`);
+  closeEditYamlDialog();
+  await getConfigMaps();
 };
 </script>
 

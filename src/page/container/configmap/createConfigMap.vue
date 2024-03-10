@@ -1,25 +1,34 @@
 <template>
-  <el-card class="title-card-container">
-    <div class="font-container">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item @click="backToConfigmap"
-          ><span style="color: black; cursor: pointer"> ConfigMap </span>
+  <div style="display: flex; flex-direction: column; width: 100%; height: 100%">
+    <div style="width: 100%; height: 50px; background: #ffffff; display: flex; align-items: center">
+      <pixiu-icon
+        name="icon-back"
+        style="cursor: pointer; margin-left: 25px"
+        size="16px"
+        type="iconfont"
+        color="#006eff"
+        @click="backToConfigmap"
+      />
+
+      <el-breadcrumb separator="/" style="margin-left: 10px; margin-top: 1px">
+        <el-breadcrumb-item
+          ><span class="breadcrumb-create-style"> 集群 </span>
         </el-breadcrumb-item>
-        <el-breadcrumb-item style="color: black">{{ data.cluster }}</el-breadcrumb-item>
-        <el-breadcrumb-item>
-          <span style="color: black"> 新建ConfigMap </span>
+        <el-breadcrumb-item
+          ><span class="breadcrumb-create-style"> {{ data.clusterName }} </span>
+        </el-breadcrumb-item>
+        <el-breadcrumb-item
+          ><span class="breadcrumb-create-style"> ConfigMaps </span>
+        </el-breadcrumb-item>
+        <el-breadcrumb-item
+          ><span class="breadcrumb-create-style"> 创建ConfigMap </span>
         </el-breadcrumb-item>
       </el-breadcrumb>
     </div>
-  </el-card>
 
-  <div
-    class="deployee-class"
-    style="display: flex; flex-direction: column; width: 100%; height: 100%"
-  >
     <el-main>
       <div class="app-pixiu-content-card">
-        <el-card style="margin-top: 8px; width: 100%; border-radius: 0px">
+        <el-card class="create-card-style" style="width: 75%">
           <el-form
             ref="ruleFormRef"
             label-position="left"
@@ -27,13 +36,16 @@
             label-width="100px"
             :rules="rules"
             status-icon
-            :model="data.configmapForm"
-            style="margin-left: 3%; width: 80%"
+            :model="data.namespaceForm"
+            class="create-card-form"
           >
             <div style="margin-top: 20px" />
-
-            <el-form-item label="名称" prop="metadata.name" style="width: 80%">
-              <el-input v-model="data.configmapForm.metadata.name" style="width: 40%" />
+            <el-form-item label="名称" prop="metadata.name">
+              <el-input
+                v-model="data.configmapForm.metadata.name"
+                style="width: 40%"
+                placeholder="请输入 configMap 名称"
+              />
               <div class="app-pixiu-line-describe2">
                 最长63个字符，只能包含小写字母、数字及分隔符("-"),且必须以小写字母开头，数字或小写字母结尾
               </div>
@@ -132,16 +144,17 @@
 
 <script setup>
 import { reactive, getCurrentInstance, onMounted, ref } from 'vue';
+import { getNamespaceNames } from '@/services/kubernetes/namespaceService';
+
 const { proxy } = getCurrentInstance();
 const ruleFormRef = ref();
 
 const data = reactive({
   loading: false,
   cluster: '',
+  clusterName: '',
+
   namespaces: [],
-  autosize: {
-    minRows: 2,
-  },
 
   configMapLabels: [{ key: null, value: null }],
 
@@ -169,7 +182,6 @@ const data = reactive({
 
 const rules = {
   'metadata.name': [{ required: true, message: '请输入 ConfigMap 名称', trigger: 'blur' }],
-  // 'item.key': [{ required: true, message: 'key 不能为空', trigger: 'blur' }],
 };
 
 const comfirmCreate = () => {
@@ -182,7 +194,7 @@ const comfirmCreate = () => {
         const resp = await proxy.$http({
           method: 'post',
           url:
-            `/proxy/pixiu/${data.cluster}/api/v1/namespaces/` +
+            `/pixiu/proxy/${data.cluster}/api/v1/namespaces/` +
             data.configmapForm.metadata.namespace +
             `/configmaps`,
           data: data.configmapForm,
@@ -201,8 +213,7 @@ const cancelCreate = () => {
 onMounted(() => {
   data.query = proxy.$route.query;
   data.cluster = data.query.cluster;
-
-  data.path = proxy.$route.fullPath;
+  data.clusterName = localStorage.getItem(data.cluster);
 
   data.configmapForm.metadata.namespace = proxy.$route.query.namespace;
   getNamespaceList();
@@ -213,17 +224,12 @@ const changeNamespace = async (val) => {
 };
 
 const getNamespaceList = async () => {
-  try {
-    const result = await proxy.$http({
-      method: 'get',
-      url: '/proxy/pixiu/' + data.cluster + '/api/v1/namespaces',
-    });
-
-    data.namespaces = [];
-    for (let item of result.items) {
-      data.namespaces.push(item.metadata.name);
-    }
-  } catch (error) {}
+  const [result, err] = await getNamespaceNames(data.cluster);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  data.namespaces = result;
 };
 
 // 回到 configmap 页面

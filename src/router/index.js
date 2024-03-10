@@ -6,9 +6,12 @@ import {
   Login,
   Role,
   User,
+  RegisterUser,
   Menu,
   Cicd,
-  Container,
+  Cluster,
+  InsertCluster,
+  CreateCluster,
   Kubernetes,
   Deployment,
   CreateDeployment,
@@ -19,8 +22,6 @@ import {
   Monitor,
   Node,
   NodeDetail,
-  InsertCluster,
-  CreateCluster,
   NotFound,
   Operator,
   Service,
@@ -37,15 +38,25 @@ import {
   CreateSecret,
   EditSecret,
   StatefulSet,
+  CreateStatefulSet,
+  EditStatefulSet,
+  StatefulSetDetail,
   StorageClass,
   CreateStorageClass,
   EditStorageClass,
   Info,
   Pod,
   PodDetail,
+  CreatePod,
   Namespace,
   CreateNamespace,
   NamespaceDetail,
+  Job,
+  CreateJob,
+  EditJob,
+  CronJob,
+  CreateCronJob,
+  EditCronJob,
 } from '@/page';
 
 const routes = [
@@ -71,15 +82,15 @@ const routes = [
         component: Home,
       },
       {
-        path: 'container',
-        name: 'Container',
+        path: 'clusters',
+        name: 'Cluster',
         meta: {
           title: '容器服务',
         },
-        component: Container,
+        component: Cluster,
       },
       {
-        path: 'insertCluster',
+        path: 'clusters/insertCluster',
         name: 'InsertCluster',
         meta: {
           title: '导入集群',
@@ -87,7 +98,7 @@ const routes = [
         component: InsertCluster,
       },
       {
-        path: 'createCluster',
+        path: 'clusters/createCluster',
         name: 'CreateCluster',
         meta: {
           title: '创建集群',
@@ -135,15 +146,7 @@ const routes = [
             component: Namespace,
           },
           {
-            path: 'createNamespace',
-            name: 'CreateNamespace',
-            meta: {
-              title: 'createNamespace',
-            },
-            component: CreateNamespace,
-          },
-          {
-            path: 'namespaceDetail',
+            path: 'namespaces/namespaceDetail',
             name: 'NamespaceDetail',
             meta: {
               title: 'namespaceDetail',
@@ -165,6 +168,22 @@ const routes = [
               title: 'statefulset',
             },
             component: StatefulSet,
+          },
+          {
+            path: 'job',
+            name: 'Job',
+            meta: {
+              title: 'job',
+            },
+            component: Job,
+          },
+          {
+            path: 'cronJob',
+            name: 'CronJob',
+            meta: {
+              title: 'cronJob',
+            },
+            component: CronJob,
           },
           {
             path: 'release',
@@ -191,22 +210,6 @@ const routes = [
             component: PodDetail,
           },
           {
-            path: 'deployments/createDeployment',
-            name: 'CreateDeployment',
-            meta: {
-              title: 'CreateDeployment',
-            },
-            component: CreateDeployment,
-          },
-          {
-            path: 'deployments/editDeployment',
-            name: 'EditDeployment',
-            meta: {
-              title: 'EditDeployment',
-            },
-            component: EditDeployment,
-          },
-          {
             path: 'deployments/detail',
             name: 'DeploymentDetail',
             meta: {
@@ -214,6 +217,14 @@ const routes = [
               // noPadding: true,
             },
             component: DeploymentDetail,
+          },
+          {
+            path: 'statefulsets/detail',
+            name: 'StatefulSetDetail',
+            meta: {
+              title: 'StatefulSetDetail',
+            },
+            component: StatefulSetDetail,
           },
           {
             path: 'operator',
@@ -247,22 +258,7 @@ const routes = [
             },
             component: Service,
           },
-          {
-            path: 'services/createService',
-            name: 'CreateService',
-            meta: {
-              title: 'CreateService',
-            },
-            component: CreateService,
-          },
-          {
-            path: 'services/editService',
-            name: 'EditService',
-            meta: {
-              title: 'EditService',
-            },
-            component: EditService,
-          },
+
           {
             path: 'services/detail',
             name: 'ServiceDetail',
@@ -279,22 +275,7 @@ const routes = [
             },
             component: Ingress,
           },
-          {
-            path: 'ingresses/createIngress',
-            name: 'CreateIngress',
-            meta: {
-              title: 'CreateIngress',
-            },
-            component: CreateIngress,
-          },
-          {
-            path: 'ingresses/editIngress',
-            name: 'EditIngress',
-            meta: {
-              title: 'EditIngress',
-            },
-            component: EditIngress,
-          },
+
           {
             path: 'configmaps',
             name: 'ConfigMap',
@@ -302,22 +283,6 @@ const routes = [
               title: 'configmap',
             },
             component: ConfigMap,
-          },
-          {
-            path: 'configmaps/createConfigMap',
-            name: 'createConfigMap',
-            meta: {
-              title: 'createConfigMap',
-            },
-            component: CreateConfigMap,
-          },
-          {
-            path: 'configmaps/editConfigMap',
-            name: 'editConfigMap',
-            meta: {
-              title: 'editConfigMap',
-            },
-            component: EditConfigMap,
           },
           {
             path: 'secrets',
@@ -328,22 +293,6 @@ const routes = [
             component: Secret,
           },
           {
-            path: 'secrets/editSecret',
-            name: 'editSecret',
-            meta: {
-              title: 'editSecret',
-            },
-            component: EditSecret,
-          },
-          {
-            path: 'secrets/createSecret',
-            name: 'createSecret',
-            meta: {
-              title: 'createSecret',
-            },
-            component: CreateSecret,
-          },
-          {
             path: 'storageclass',
             name: 'StorageClass',
             meta: {
@@ -351,23 +300,159 @@ const routes = [
             },
             component: StorageClass,
           },
-          {
-            path: 'storageclasses/createStorageClass',
-            name: 'CreateStorageClass',
-            meta: {
-              title: 'CreateStorageclass',
-            },
-            component: CreateStorageClass,
-          },
-          {
-            path: 'storageclasses/editStorageClass',
-            name: 'EditStorageClass',
-            meta: {
-              title: 'EditStorageClass',
-            },
-            component: EditStorageClass,
-          },
         ],
+      },
+      // 命名空间路由
+      {
+        path: 'namespaces/createNamespace',
+        name: 'CreateNamespace',
+        meta: {
+          title: 'createNamespace',
+        },
+        component: CreateNamespace,
+      },
+      // storageclasses 路由
+      {
+        path: 'storageclasses/createStorageClass',
+        name: 'CreateStorageClass',
+        meta: {
+          title: 'CreateStorageclass',
+        },
+        component: CreateStorageClass,
+      },
+      {
+        path: 'storageclasses/editStorageClass',
+        name: 'EditStorageClass',
+        meta: {
+          title: 'EditStorageClass',
+        },
+        component: EditStorageClass,
+      },
+      // service 路由
+      {
+        path: 'services/createService',
+        name: 'CreateService',
+        meta: {
+          title: 'CreateService',
+        },
+        component: CreateService,
+      },
+      {
+        path: 'services/editService',
+        name: 'EditService',
+        meta: {
+          title: 'EditService',
+        },
+        component: EditService,
+      },
+      // ingress 创建和编辑路由
+      {
+        path: 'ingresses/createIngress',
+        name: 'CreateIngress',
+        meta: {
+          title: 'CreateIngress',
+        },
+        component: CreateIngress,
+      },
+      {
+        path: 'ingresses/editIngress',
+        name: 'EditIngress',
+        meta: {
+          title: 'EditIngress',
+        },
+        component: EditIngress,
+      },
+      // configMap 创建和编辑路由
+      {
+        path: 'configmaps/createConfigMap',
+        name: 'createConfigMap',
+        meta: {
+          title: 'createConfigMap',
+        },
+        component: CreateConfigMap,
+      },
+      {
+        path: 'configmaps/editConfigMap',
+        name: 'editConfigMap',
+        meta: {
+          title: 'editConfigMap',
+        },
+        component: EditConfigMap,
+      },
+
+      // secret 路由
+      {
+        path: 'secrets/editSecret',
+        name: 'editSecret',
+        meta: {
+          title: 'editSecret',
+        },
+        component: EditSecret,
+      },
+      {
+        path: 'secrets/createSecret',
+        name: 'createSecret',
+        meta: {
+          title: 'createSecret',
+        },
+        component: CreateSecret,
+      },
+      // job 路由
+      {
+        path: 'job/createJob',
+        name: 'createJob',
+        meta: {
+          title: 'createJob',
+        },
+        component: CreateJob,
+      },
+      {
+        path: 'job/createJob',
+        name: 'createJob',
+        meta: {
+          title: 'createJob',
+        },
+        component: CreateJob,
+      },
+      {
+        path: 'pods/createPod',
+        name: 'CreatePod',
+        meta: {
+          title: 'CreatePod',
+        },
+        component: CreatePod,
+      },
+      {
+        path: 'deployments/createDeployment',
+        name: 'CreateDeployment',
+        meta: {
+          title: 'CreateDeployment',
+        },
+        component: CreateDeployment,
+      },
+      {
+        path: 'deployments/editDeployment',
+        name: 'EditDeployment',
+        meta: {
+          title: 'EditDeployment',
+        },
+        component: EditDeployment,
+      },
+      {
+        path: 'statefulsets/createStatefulSet',
+        name: 'CreateStatefulSet',
+        meta: {
+          title: 'CreateStatefulSet',
+        },
+        component: CreateStatefulSet,
+      },
+      {
+        path: 'statefulsets/editStatefulSet',
+        name: 'EditStatefulSet',
+        meta: {
+          title: 'EditStatefulSet',
+        },
+        component: EditStatefulSet,
       },
       {
         path: 'cicd',
@@ -410,6 +495,12 @@ const routes = [
     component: Login,
   },
   {
+    // 用户注册路由
+    path: '/registerUser',
+    name: 'RegisterUser',
+    component: RegisterUser,
+  },
+  {
     path: '/podshell',
     name: 'PodShell',
     component: Terminal,
@@ -424,11 +515,14 @@ const router = createRouter({
 
 router.beforeEach((to, from) => {
   const token = localStorage.getItem('token');
-  if (!token && to.fullPath !== '/login') {
-    return { name: 'Login' };
-  }
-  if (token && to.fullPath === '/login') {
-    return { name: 'Index' };
+
+  if (to.fullPath !== '/registerUser') {
+    if (!token && to.fullPath !== '/login') {
+      return { name: 'Login' };
+    }
+    if (token && to.fullPath === '/login') {
+      return { name: 'Index' };
+    }
   }
 });
 

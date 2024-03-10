@@ -1,7 +1,7 @@
 <template>
   <el-card class="title-card-container">
     <div class="font-container">Deployment</div>
-    <PiXiuYaml></PiXiuYaml>
+    <PiXiuYaml :refresh="getDeployments"></PiXiuYaml>
   </el-card>
 
   <div style="margin-top: 25px">
@@ -44,7 +44,7 @@
     <el-card class="box-card">
       <el-table
         v-loading="data.loading"
-        :data="data.deploymentList"
+        :data="data.tableData"
         stripe
         style="margin-top: 2px; width: 100%"
         header-row-class-name="pixiu-table-header"
@@ -56,7 +56,7 @@
       >
         <el-table-column type="selection" width="30" />
 
-        <el-table-column prop="metadata.name" sortable label="名称" width="180">
+        <el-table-column prop="metadata.name" sortable label="名称">
           <template #default="scope">
             <el-link class="global-table-world" type="primary" @click="jumpRoute(scope.row)">
               {{ scope.row.metadata.name }}
@@ -64,35 +64,25 @@
           </template>
         </el-table-column>
 
-        <!-- <el-table-column prop="metadata.creationTimestamp" label="创建时间" width="180" /> -->
-
         <el-table-column
           prop="spec.template.metadata.labels"
           label="Labels"
-          width="210"
           :formatter="formatterLabels"
         />
 
         <el-table-column
           prop="spec.selector.matchLabels"
           label="Selector"
-          width="210"
           :formatter="formatterLabels"
         >
         </el-table-column>
 
-        <el-table-column
-          prop="status"
-          label="Pod状态运行/期望"
-          width="180"
-          :formatter="formatterStatus"
-        >
+        <el-table-column prop="status" label="Pod状态" :formatter="formatterStatus" width="90px">
         </el-table-column>
 
         <el-table-column
           label="镜像"
           prop="spec.template.spec.containers"
-          width="auto"
           :formatter="formatterImage"
         >
         </el-table-column>
@@ -124,8 +114,17 @@
               </span>
               <template #dropdown>
                 <el-dropdown-menu class="dropdown-buttons">
-                  <el-dropdown-item style="color: #006eff" @click="deleteDeployment(scope.row)">
+                  <el-dropdown-item
+                    class="dropdown-item-buttons"
+                    @click="handleDeleteDialog(scope.row)"
+                  >
                     删除
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    class="dropdown-item-buttons"
+                    @click="handleEditYamlDialog(scope.row)"
+                  >
+                    编辑yaml
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -138,16 +137,7 @@
         </template>
       </el-table>
 
-      <el-pagination
-        v-model:currentPage="data.pageInfo.page"
-        v-model:page-size="data.pageInfo.page_size"
-        style="float: right; margin-right: 30px; margin-top: 20px; margin-bottom: 20px"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next, jumper"
-        :total="data.pageInfo.total"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
+      <pagination :total="data.pageInfo.total" @on-change="onChange"></pagination>
     </el-card>
   </div>
 
@@ -184,17 +174,60 @@
       </span>
     </template>
   </el-dialog>
+
+  <!-- 编辑 yaml 页面 -->
+  <el-dialog
+    :model-value="data.editYamlDialog"
+    style="color: #000000; font: 14px; margin-top: 50px"
+    width="800px"
+    center
+    @close="closeEditYamlDialog"
+  >
+    <template #header>
+      <div style="text-align: left; font-weight: bold; padding-left: 5px">YAML 设置</div>
+    </template>
+    <div style="margin-top: -18px"></div>
+    <MyCodeMirror ref="editYaml" :yaml="data.yaml" :height="650"></MyCodeMirror>
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button class="pixiu-small-cancel-button" @click="closeEditYamlDialog">取消</el-button>
+        <el-button type="primary" class="pixiu-small-confirm-button" @click="confirmEditYaml"
+          >确认</el-button
+        >
+      </span>
+    </template>
+  </el-dialog>
+
+  <pixiuDialog
+    :close-event="data.deleteDialog.close"
+    :object-name="data.deleteDialog.objectName"
+    :delete-name="data.deleteDialog.deleteName"
+    @confirm="confirm"
+    @cancel="cancel"
+  ></pixiuDialog>
 </template>
 
 <script setup lang="jsx">
 import { useRouter } from 'vue-router';
-import { reactive, getCurrentInstance, onMounted } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { reactive, getCurrentInstance, onMounted, ref } from 'vue';
+import jsYaml from 'js-yaml';
+import { getTableData } from '@/utils/utils';
 import PixiuTag from '@/components/pixiuTag/index.vue';
 import PiXiuYaml from '@/components/pixiuyaml/index.vue';
+import { getNamespaceNames } from '@/services/kubernetes/namespaceService';
+import {
+  getDeploymentList,
+  getDeployment,
+  updateDeployment,
+  deleteDeployment,
+} from '@/services/kubernetes/deploymentService';
+import MyCodeMirror from '@/components/codemirror/index.vue';
+import Pagination from '@/components/pagination/index.vue';
+import pixiuDialog from '@/components/pixiuDialog/index.vue';
 
 const { proxy } = getCurrentInstance();
 const router = useRouter();
+const editYaml = ref();
 
 const data = reactive({
   cluster: '',
@@ -204,6 +237,7 @@ const data = reactive({
     query: '',
     total: 0,
   },
+  tableData: [],
   loading: false,
 
   namespace: 'default',
@@ -216,34 +250,107 @@ const data = reactive({
     origin: '',
     target: 0,
   },
+
+  // yaml相关属性
+  yaml: '',
+  yamlName: '',
+  editYamlDialog: false,
+
+  // 删除对象属性
+  deleteDialog: {
+    close: false,
+    objectName: 'Deployment',
+    deleteName: '',
+  },
 });
-
-const handleSizeChange = (newSize) => {
-  data.pageInfo.limit = newSize;
-  getDeployments();
-};
-
-const handleCurrentChange = (newPage) => {
-  data.pageInfo.page = newPage;
-  getDeployments();
-};
-
-const createDeployment = () => {
-  const url = `/kubernetes/deployments/createDeployment?cluster=${data.cluster}&namespace=${data.namespace}`;
-  router.push(url);
-};
-
-const editDeployment = (row) => {
-  const url = `/kubernetes/deployments/editDeployment?cluster=${data.cluster}&namespace=${data.namespace}&name=${row.metadata.name}`;
-  router.push(url);
-};
 
 onMounted(() => {
   data.cluster = proxy.$route.query.cluster;
 
   getDeployments();
-  getNamespaceList();
+  getNamespaces();
 });
+
+const handleDeleteDialog = (row) => {
+  data.deleteDialog.close = true;
+  data.deleteDialog.deleteName = row.metadata.name;
+};
+
+const confirm = async () => {
+  const [result, err] = await deleteDeployment(
+    data.cluster,
+    data.namespace,
+    data.deleteDialog.deleteName,
+  );
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  proxy.$message.success(`Deployment(${data.deleteDialog.deleteName}) 删除成功`);
+
+  clean();
+  await getDeployments();
+};
+
+const cancel = () => {
+  clean();
+};
+
+const clean = () => {
+  data.deleteDialog.close = false;
+  data.deleteDialog.deleteName = '';
+};
+
+const onChange = (v) => {
+  data.pageInfo.limit = v.limit;
+  data.pageInfo.page = v.page;
+
+  data.tableData = getTableData(data.pageInfo, data.deploymentList);
+};
+
+const handleEditYamlDialog = async (row) => {
+  data.yamlName = row.metadata.name;
+  const [result, err] = await getDeployment(data.cluster, data.namespace, data.yamlName);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  data.yaml = jsYaml.dump(result);
+  data.editYamlDialog = true;
+};
+
+const closeEditYamlDialog = (row) => {
+  data.yaml = '';
+  data.yamlName = '';
+  data.editYamlDialog = false;
+};
+
+const confirmEditYaml = async () => {
+  const yamlData = jsYaml.load(editYaml.value.code);
+  const [result, err] = await updateDeployment(
+    data.cluster,
+    data.namespace,
+    data.yamlName,
+    yamlData,
+  );
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  proxy.$message.success(`Deployment(${data.yamlName}) YAML 更新成功`);
+  closeEditYamlDialog();
+  await getDeployments();
+};
+
+const createDeployment = () => {
+  const url = `/deployments/createDeployment?cluster=${data.cluster}`;
+  router.push(url);
+};
+
+const editDeployment = (row) => {
+  const url = `/deployments/editDeployment?cluster=${data.cluster}&name=${row.metadata.name}`;
+  router.push(url);
+};
 
 const jumpRoute = (row) => {
   router.push({
@@ -258,15 +365,16 @@ const jumpRoute = (row) => {
 
 const getDeployments = async () => {
   data.loading = true;
-  const res = await proxy.$http({
-    method: 'get',
-    url: `/proxy/pixiu/${data.cluster}/apis/apps/v1/namespaces/${data.namespace}/deployments`,
-    data: data.pageInfo,
-  });
-
+  const [result, err] = await getDeploymentList(data.cluster, data.namespace);
   data.loading = false;
-  data.deploymentList = res.items;
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+
+  data.deploymentList = result.items;
   data.pageInfo.total = data.deploymentList.length;
+  data.tableData = getTableData(data.pageInfo, data.deploymentList);
 };
 
 const changeNamespace = async (val) => {
@@ -276,39 +384,13 @@ const changeNamespace = async (val) => {
   getDeployments();
 };
 
-const getNamespaceList = async () => {
-  try {
-    const result = await proxy.$http({
-      method: 'get',
-      url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces`,
-    });
-
-    for (let item of result.items) {
-      data.namespaces.push(item.metadata.name);
-    }
-  } catch (error) {}
-};
-
-const deleteDeployment = (row) => {
-  ElMessageBox.confirm('此操作将永久删除 ' + row.metadata.name + ' Deployment. 是否继续?', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning',
-    draggable: true,
-  })
-    .then(async () => {
-      await proxy.$http({
-        method: 'delete',
-        url: `/proxy/pixiu/${data.cluster}/apis/apps/v1/namespaces/${data.namespace}/deployments/${row.metadata.name}`,
-      });
-      ElMessage({
-        type: 'success',
-        message: '删除 ' + row.metadata.name + ' 成功',
-      });
-
-      await getDeployments();
-    })
-    .catch(() => {}); // 取消
+const getNamespaces = async () => {
+  const [result, err] = await getNamespaceNames(data.cluster);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  data.namespaces = result;
 };
 
 const handleDeploymentScaleDialog = (row) => {
@@ -330,7 +412,7 @@ const confirmDeploymentScale = async () => {
   try {
     const res = await proxy.$http({
       method: 'patch',
-      url: `/proxy/pixiu/${data.cluster}/apis/apps/v1/namespaces/${data.namespace}/deployments/${data.deploymentRepcliasFrom.name}/scale`,
+      url: `/pixiu/proxy/${data.cluster}/apis/apps/v1/namespaces/${data.namespace}/deployments/${data.deploymentRepcliasFrom.name}/scale`,
       data: {
         spec: {
           replicas: Number(data.deploymentRepcliasFrom.target),
@@ -349,35 +431,61 @@ const confirmDeploymentScale = async () => {
 };
 
 const formatterLabels = (row, column, cellValue) => {
+  if (!cellValue) return <div>-</div>;
   const labels = Object.entries(cellValue).map(([key, value]) => {
     return `${key}: ${value}`;
   });
 
-  return (
+  let labels1 = labels;
+  if (labels1.length > 2) {
+    labels1 = labels1.slice(0, 2);
+    labels1.push('...');
+  }
+
+  const displayContent = `
     <div>
-      {' '}
-      {labels.map((label) => (
-        <div class="pixiu-table-formatter">{label}</div>
-      ))}{' '}
+      ${labels.map((label) => `<div class="pixiu-table-formatter">${label}</div>`).join('')}
     </div>
+  `;
+
+  return (
+    <el-tooltip effect="light" placement="top" content={displayContent.toString()} raw-content>
+      <div>
+        {labels1.map((label) => (
+          <div class="pixiu-ellipsis-style">{label}</div>
+        ))}
+      </div>
+    </el-tooltip>
   );
 };
 
 const formatterStatus = (row, column, cellValue) => {
+  let availableReplicas = cellValue.availableReplicas;
+  if (availableReplicas === undefined) {
+    availableReplicas = 0;
+  }
   return (
     <div>
-      {cellValue.availableReplicas}/{cellValue.replicas}
+      {availableReplicas}/{row.spec.replicas}
     </div>
   );
 };
 
 const formatterImage = (row, column, cellValue) => {
-  return (
+  const images = [];
+  for (let c of cellValue) {
+    images.push(c.image);
+  }
+
+  const displayContent = `
     <div>
-      {cellValue.map((item) => (
-        <div>{item.image}</div>
-      ))}
+      ${images.map((image) => `<div class="pixiu-table-formatter">${image}</div>`).join('')}
     </div>
+  `;
+  return (
+    <el-tooltip effect="light" placement="top" content={displayContent.toString()} raw-content>
+      <div class="pixiu-ellipsis-style">{images.join(',')}</div>;
+    </el-tooltip>
   );
 };
 </script>

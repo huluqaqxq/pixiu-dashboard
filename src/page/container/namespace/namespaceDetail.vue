@@ -10,24 +10,24 @@
         @click="goToNamespace"
       />
 
-      <el-breadcrumb separator="/" style="margin-left: 20px">
-        <el-breadcrumb-item><span class="breadcrumb-style">集群</span></el-breadcrumb-item>
-
-        <el-breadcrumb-item>
-          <span class="breadcrumb-style">{{ data.cluster }}</span>
-        </el-breadcrumb-item>
-
+      <el-breadcrumb separator="/" style="margin-left: 10px">
         <el-breadcrumb-item
-          ><span class="breadcrumb-style">Namespace({{ data.name }})</span>
+          ><span class="breadcrumb-create-style"> {{ data.clusterName }} </span>
+        </el-breadcrumb-item>
+        <el-breadcrumb-item
+          ><span class="breadcrumb-create-style"> Namespace: {{ data.name }} </span>
+        </el-breadcrumb-item>
+        <el-breadcrumb-item
+          ><span class="breadcrumb-create-style"> Namespace详情 </span>
         </el-breadcrumb-item>
       </el-breadcrumb>
     </div>
 
-    <div style="margin-top: 20px"></div>
+    <div style="margin-top: 28px"></div>
 
     <el-tabs
       v-model="data.activeName"
-      class="namespace-tab"
+      class="detail-card-new-style"
       @tab-click="handleClick"
       @tab-change="handleChange"
     >
@@ -37,7 +37,7 @@
   </el-card>
 
   <div v-if="data.activeName === 'first'">
-    <el-card class="contend-card-container2">
+    <el-card class="contend-card-container2" style="width: 70%">
       <div class="big-world-style" style="margin-bottom: 20px">基本信息</div>
       <div v-if="data.namespace.metadata" style="margin-top: 8px; width: 100%; border-radius: 0px">
         <el-form-item label="名称" class="namespace-info">
@@ -83,11 +83,13 @@
         </div>
       </el-col>
     </div>
-    <div style="margin-top: 10px"></div>
-    <MyCodeMirror :yaml="data.yaml" :read-only="data.readOnly"></MyCodeMirror>
-    <div v-if="!data.readOnly" style="margin-top: 10px">
-      <el-button class="pixiu-cancel-button" @click="cancel()">取消</el-button>
-      <el-button class="pixiu-confirm-button" type="primary" @click="confirm()">确定</el-button>
+    <div style="margin-top: 15px"></div>
+    <div>
+      <MyCodeMirror :yaml="data.yaml" :read-only="data.readOnly"></MyCodeMirror>
+      <div v-if="!data.readOnly" style="margin-top: 10px">
+        <el-button class="pixiu-cancel-button" @click="cancel()">取消</el-button>
+        <el-button class="pixiu-confirm-button" type="primary" @click="confirm()">确定</el-button>
+      </div>
     </div>
   </div>
 </template>
@@ -106,6 +108,8 @@ const router = useRouter();
 
 const data = reactive({
   cluster: '',
+  clusterName: '',
+
   name: '',
 
   pageInfo: {
@@ -126,6 +130,8 @@ const data = reactive({
 
 onMounted(async () => {
   data.cluster = proxy.$route.query.cluster;
+  data.clusterName = localStorage.getItem(data.cluster);
+
   data.name = proxy.$route.query.name;
 
   await getNamespace();
@@ -151,7 +157,7 @@ const getNamespace = async () => {
   try {
     const res = await proxy.$http({
       method: 'get',
-      url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.name}`,
+      url: `/pixiu/proxy/${data.cluster}/api/v1/namespaces/${data.name}`,
     });
     data.namespace = res;
 
@@ -171,12 +177,7 @@ const formatterTime = (row, column, cellValue) => {
   const time = formatTimestamp(cellValue);
   return (
     <el-tooltip effect="light" placement="top" content={time}>
-      <div
-        class="pixiu-table-formatter"
-        style="white-space: nowrap;overflow: hidden;text-overflow: ellipsis;"
-      >
-        {time}
-      </div>
+      <div class="pixiu-ellipsis-style">{time}</div>
     </el-tooltip>
   );
 };
@@ -195,11 +196,6 @@ const editYaml = () => {
 </script>
 
 <style scoped="scoped">
-.namespace-tab {
-  margin-top: 1px;
-  margin-bottom: -32px;
-}
-
 .namespace-info {
   color: #909399;
   font-size: 13px;

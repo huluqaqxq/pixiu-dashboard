@@ -1,28 +1,7 @@
 <template>
   <el-card class="title-card-container">
     <div class="font-container">Secret</div>
-    <PiXiuYaml :cluster="data.cluster"></PiXiuYaml>
-    <!--    <div-->
-    <!--      style="-->
-    <!--        display: block;-->
-    <!--        font-size: 12px;-->
-    <!--        margin-top: -20px;-->
-    <!--        float: right;-->
-    <!--        color: rgba(0, 0, 0, 0.9);-->
-    <!--      "-->
-    <!--    >-->
-    <!--      操作指南-->
-    <!--      <el-icon style="vertical-align: middle; margin-right: 10px">-->
-    <!--        <component :is="'Edit'" />-->
-    <!--      </el-icon>-->
-    <!--      <button-->
-    <!--        class="pixiu-two-button"-->
-    <!--        style="width: 125px; margin-top: -10px"-->
-    <!--        @click="handleEditSecretYamlDialog"-->
-    <!--      >-->
-    <!--        YAML创建资源-->
-    <!--      </button>-->
-    <!--    </div>-->
+    <PiXiuYaml :refresh="getSecrets"></PiXiuYaml>
   </el-card>
 
   <div style="margin-top: 25px">
@@ -58,7 +37,7 @@
     <el-card class="box-card">
       <el-table
         v-loading="data.loading"
-        :data="data.secretList"
+        :data="data.tableData"
         stripe
         style="margin-top: 2px; width: 100%"
         header-row-class-name="pixiu-table-header"
@@ -93,9 +72,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="Labels" width="auto">
-          <span>-</span>
-        </el-table-column>
+        <el-table-column label="类型" width="auto" prop="type"> </el-table-column>
 
         <el-table-column
           prop="metadata.creationTimestamp"
@@ -107,6 +84,11 @@
         <el-table-column fixed="right" label="操作" width="200">
           <template #default="scope">
             <el-button
+              :disabled="
+                scope.row.type !== 'kubernetes.io/dockercfg' &&
+                scope.row.type !== 'Opaque' &&
+                scope.row.type !== 'kubernetes.io/tls'
+              "
               size="small"
               type="text"
               style="margin-right: -20px; margin-left: -10px; color: #006eff"
@@ -114,12 +96,11 @@
             >
               更新配置
             </el-button>
-
             <el-button
               type="text"
               size="small"
               style="margin-right: 1px; color: #006eff"
-              @click="handleEditSecretYamlDialog(scope.row)"
+              @click="handleEditYamlDialog(scope.row)"
             >
               编辑yaml
             </el-button>
@@ -128,7 +109,7 @@
               type="text"
               size="small"
               style="margin-right: 1px; margin-left: -2px; color: #006eff"
-              @click="deleteSecret(scope.row)"
+              @click="handleDeleteDialog(scope.row)"
             >
               删除
             </el-button>
@@ -140,25 +121,16 @@
         </template>
       </el-table>
 
-      <el-pagination
-        v-model:currentPage="data.pageInfo.page"
-        v-model:page-size="data.pageInfo.page_size"
-        style="float: right; margin-right: 30px; margin-top: 20px; margin-bottom: 20px"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next, jumper"
-        :total="data.pageInfo.total"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
+      <pagination :total="data.pageInfo.total" @on-change="onChange"></pagination>
     </el-card>
   </div>
 
   <el-dialog
-    :model-value="data.secretYamlDialog"
+    :model-value="data.editYamlDialog"
     style="color: #000000; font: 14px; margin-top: 50px"
     width="800px"
     center
-    @close="closeSecretYamlDialog"
+    @close="closeYamlDialog"
   >
     <template #header>
       <div style="text-align: left; font-weight: bold; padding-left: 5px">编辑yaml</div>
@@ -168,16 +140,21 @@
 
     <template #footer>
       <span class="dialog-footer">
-        <el-button class="pixiu-small-cancel-button" @click="closeSecretYamlDialog">取消</el-button>
-        <el-button
-          type="primary"
-          class="pixiu-small-confirm-button"
-          @click="confirmEditConfigmapYaml"
+        <el-button class="pixiu-small-cancel-button" @click="closeYamlDialog">取消</el-button>
+        <el-button type="primary" class="pixiu-small-confirm-button" @click="confirmEditYaml"
           >确认</el-button
         >
       </span>
     </template>
   </el-dialog>
+
+  <pixiuDialog
+    :close-event="data.deleteDialog.close"
+    :object-name="data.deleteDialog.objectName"
+    :delete-name="data.deleteDialog.deleteName"
+    @confirm="confirm"
+    @cancel="cancel"
+  ></pixiuDialog>
 </template>
 
 <script setup lang="jsx">
@@ -185,10 +162,20 @@ import { useRouter } from 'vue-router';
 import { reactive, getCurrentInstance, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import useClipboard from 'vue-clipboard3';
-import { formatTimestamp } from '@/utils/utils';
 import jsYaml from 'js-yaml';
+import { formatTimestamp, getTableData } from '@/utils/utils';
 import PiXiuYaml from '@/components/pixiuyaml/index.vue';
+import { getNamespaceNames } from '@/services/kubernetes/namespaceService';
 import MyCodeMirror from '@/components/codemirror/index.vue';
+import Pagination from '@/components/pagination/index.vue';
+import {
+  getSecretList,
+  updateSecret,
+  getSecret,
+  deleteSecret,
+} from '@/services/kubernetes/secretService';
+import pixiuDialog from '@/components/pixiuDialog/index.vue';
+
 const { proxy } = getCurrentInstance();
 const router = useRouter();
 const editYaml = ref();
@@ -200,67 +187,82 @@ const data = reactive({
     query: '',
     total: 0,
   },
+  tableData: [],
   loading: false,
   yaml: '',
   yamlName: '',
-  createSecretUrl: '',
   namespace: 'default',
   namespaces: [],
   secretList: [],
-  secretYamlDialog: false,
+  editYamlDialog: false,
   isShow: false,
   showTooltip: false, // 控制提示信息的显示状态，默认为隐藏
   showIcon: false, // 控制图标的显示状态，默认为隐藏
+
+  // 删除对象属性
+  deleteDialog: {
+    close: false,
+    objectName: 'Secret',
+    deleteName: '',
+  },
 });
-
-const handleSizeChange = (newSize) => {
-  data.pageInfo.limit = newSize;
-  getSecrets();
-};
-
-const handleCurrentChange = (newPage) => {
-  data.pageInfo.page = newPage;
-  getSecrets();
-};
-
-const createSecret = () => {
-  const url = `/kubernetes/secrets/createSecret?cluster=${data.cluster}&namespace=${data.namespace}`;
-  router.push(url);
-};
-
-const editSecret = (row) => {
-  const url = `/kubernetes/secrets/editSecret?cluster=${data.cluster}&namespace=${data.namespace}&name=${row.metadata.name}`;
-  router.push(url);
-};
-
-const deleteSecret = (row) => {
-  ElMessageBox.confirm('此操作将永久删除 Secret ' + row.metadata.name + ' . 是否继续?', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning',
-    draggable: true,
-  })
-    .then(() => {
-      const res = proxy.$http({
-        method: 'delete',
-        url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/secrets/${row.metadata.name}`,
-      });
-      ElMessage({
-        type: 'success',
-        message: '删除 ' + row.metadata.name + ' 成功',
-      });
-      getSecrets();
-    })
-    .catch(() => {}); // 取消
-};
 
 onMounted(() => {
   data.cluster = proxy.$route.query.cluster;
   data.cloud = proxy.$route.query;
   data.path = proxy.$route.fullPath;
-  getNamespaceList();
+
+  getNamespaces();
   getSecrets();
 });
+
+const handleDeleteDialog = (row) => {
+  data.deleteDialog.close = true;
+  data.deleteDialog.deleteName = row.metadata.name;
+};
+
+const confirm = async () => {
+  const [result, err] = await deleteSecret(
+    data.cluster,
+    data.namespace,
+    data.deleteDialog.deleteName,
+  );
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  proxy.$message.success(
+    `${data.deleteDialog.objectName}(${data.deleteDialog.deleteName}) 删除成功`,
+  );
+
+  clean();
+  await getSecrets();
+};
+
+const cancel = () => {
+  clean();
+};
+
+const clean = () => {
+  data.deleteDialog.close = false;
+  data.deleteDialog.deleteName = '';
+};
+
+const onChange = (v) => {
+  data.pageInfo.limit = v.limit;
+  data.pageInfo.page = v.page;
+  data.tableData = getTableData(data.pageInfo, data.secretList);
+};
+
+const createSecret = () => {
+  const url = `/secrets/createSecret?cluster=${data.cluster}`;
+  router.push(url);
+};
+
+const editSecret = (row) => {
+  const url = `/secrets/editSecret?cluster=${data.cluster}&name=${row.metadata.name}`;
+  router.push(url);
+};
 
 const jumpRoute = (row) => {
   router.push({
@@ -291,15 +293,15 @@ const copy = async (val) => {
 const getSecrets = async () => {
   data.loading = true;
   data.namespace = localStorage.getItem('namespace');
-  const res = await proxy.$http({
-    method: 'get',
-    url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/secrets`,
-    data: data.pageInfo,
-  });
-
+  const [res, err] = await getSecretList(data.cluster, data.namespace);
   data.loading = false;
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
   data.secretList = res.items;
   data.pageInfo.total = data.secretList.length;
+  data.tableData = getTableData(data.pageInfo, data.secretList);
 };
 
 const changeNamespace = async (val) => {
@@ -308,52 +310,50 @@ const changeNamespace = async (val) => {
   getSecrets();
 };
 
-const getNamespaceList = async () => {
-  try {
-    const result = await proxy.$http({
-      method: 'get',
-      url: '/proxy/pixiu/' + data.cloud.cluster + '/api/v1/namespaces',
-    });
-
-    for (let item of result.items) {
-      data.namespaces.push(item.metadata.name);
-    }
-    data.createSecretUrl = `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/secrets`;
-  } catch (error) {}
+const getNamespaces = async () => {
+  const [result, err] = await getNamespaceNames(data.cluster);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  data.namespaces = result;
 };
 
 const formatterTime = (row, column, cellValue) => {
   const time = formatTimestamp(cellValue);
-  return <div>{time}</div>;
+  return (
+    <el-tooltip effect="light" placement="top" content={time}>
+      <div class="pixiu-ellipsis-style">{time}</div>
+    </el-tooltip>
+  );
 };
 
-const handleEditSecretYamlDialog = (row) => {
-  data.yaml = jsYaml.dump(row);
+const handleEditYamlDialog = async (row) => {
   data.yamlName = row.metadata.name;
-  data.secretYamlDialog = true;
+  const [result, err] = await getSecret(data.cluster, data.namespace, data.yamlName);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  data.yaml = jsYaml.dump(result);
+  data.editYamlDialog = true;
 };
 
-const closeSecretYamlDialog = () => {
-  data.secretYamlDialog = false;
+const closeYamlDialog = () => {
   data.yaml = '';
+  data.yamlName = '';
+  data.editYamlDialog = false;
 };
 
-const confirmEditConfigmapYaml = async () => {
-  let yaml = jsYaml.load(editYaml.value.code);
-  try {
-    const resp = await proxy.$http({
-      method: 'put',
-      url:
-        `/proxy/pixiu/${data.cloud.cluster}/api/v1/namespaces/` +
-        data.configmapForm.metadata.namespace +
-        `/secrets/` +
-        data.yamlName,
-      data: yaml,
-    });
-  } catch (error) {}
-  data.secretYamlDialog = false;
-  data.yaml = '';
-  proxy.$message.success(`secret ${data.yamlName} 更新成功`);
+const confirmEditYaml = async () => {
+  let yamlData = jsYaml.load(editYaml.value.code);
+  const [result, err] = await updateSecret(data.cluster, data.namespace, data.yamlName, yamlData);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  closeYamlDialog();
+  proxy.$message.success(`Secret(${data.yamlName}) YAML 更新成功`);
 };
 </script>
 

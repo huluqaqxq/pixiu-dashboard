@@ -1,5 +1,7 @@
 import Cicd from './cicd/cicd.vue';
-import Container from './container/container.vue';
+import Cluster from './container/cluster/cluster.vue';
+import InsertCluster from './container/cluster/insertCluster.vue';
+import CreateCluster from './container/cluster/createCluster.vue';
 import Kubernetes from './container/kubernetes.vue';
 import Operator from './container/operator.vue';
 import Deployment from './container/deployment/deployment.vue';
@@ -7,6 +9,9 @@ import CreateDeployment from './container/deployment/createDeployment.vue';
 import EditDeployment from './container/deployment/editDeployment.vue';
 import DeploymentDetail from './container/deployment/details.vue';
 import StatefulSet from './container/statefulset/statefulset.vue';
+import CreateStatefulSet from './container/statefulset/createStatefulSet.vue';
+import EditStatefulSet from './container/statefulset/editStatefulSet.vue';
+import StatefulSetDetail from './container/statefulset/details.vue';
 import Release from './container/release/release.vue';
 import Terminal from './container/terminal.vue';
 import Monitor from './container/monitor.vue';
@@ -17,10 +22,9 @@ import Home from './home/home.vue';
 import Login from './login/login.vue';
 import Setting from './setting/setting.vue';
 import User from './user/user.vue';
+import RegisterUser from './user/registerUser.vue';
 import Menu from './user/menu.vue';
 import Role from './user/role.vue';
-import InsertCluster from './container/insertCluster.vue';
-import CreateCluster from './container/createCluster.vue';
 import Service from './container/service/service.vue';
 import ServiceDetail from './container/service/serviceDetail.vue';
 import CreateService from './container/service/createService.vue';
@@ -36,6 +40,7 @@ import CreateIngress from './container/ingress/createIngress.vue';
 import EditIngress from './container/ingress/editIngress.vue';
 import Pod from './container/pod/pod.vue';
 import PodDetail from './container/pod/podDetail.vue';
+import CreatePod from './container/pod/createPod.vue';
 import StorageClass from './container/storageclass/storageclass.vue';
 import CreateStorageClass from './container/storageclass/createStorageclass.vue';
 import EditStorageClass from './container/storageclass/editStorageclass.vue';
@@ -43,6 +48,12 @@ import Namespace from './container/namespace/namespace.vue';
 import CreateNamespace from './container/namespace/createNamespace.vue';
 import NamespaceDetail from './container/namespace/namespaceDetail.vue';
 import NotFound from './notFound/notFound.vue';
+import Job from './container/job/job.vue';
+import CreateJob from './container/job/createJob.vue';
+import EditJob from './container/job/editJob.vue';
+import CronJob from './container/cronjob/cronJob.vue';
+import CreateCronJob from './container/cronjob/createCronJob.vue';
+import EditCronJob from './container/cronjob/editCronJob.vue';
 export {
   Home,
   Login,
@@ -50,8 +61,8 @@ export {
   Menu,
   Setting,
   User,
+  RegisterUser,
   Cicd,
-  Container,
   Kubernetes,
   Deployment,
   CreateDeployment,
@@ -62,6 +73,7 @@ export {
   NodeDetail,
   Terminal,
   Monitor,
+  Cluster,
   InsertCluster,
   CreateCluster,
   Operator,
@@ -70,6 +82,9 @@ export {
   CreateService,
   EditService,
   StatefulSet,
+  CreateStatefulSet,
+  EditStatefulSet,
+  StatefulSetDetail,
   ConfigMap,
   CreateConfigMap,
   EditConfigMap,
@@ -81,6 +96,7 @@ export {
   EditIngress,
   Pod,
   PodDetail,
+  CreatePod,
   StorageClass,
   CreateStorageClass,
   EditStorageClass,
@@ -89,4 +105,10 @@ export {
   CreateNamespace,
   NamespaceDetail,
   NotFound,
+  Job,
+  CreateJob,
+  EditJob,
+  CronJob,
+  CreateCronJob,
+  EditCronJob,
 };

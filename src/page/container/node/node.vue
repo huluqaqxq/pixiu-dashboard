@@ -1,7 +1,7 @@
 <template>
   <el-card class="title-card-container">
     <div class="font-container">节点管理</div>
-    <PiXiuYaml></PiXiuYaml>
+    <PiXiuYaml :refresh="getNodes"></PiXiuYaml>
   </el-card>
 
   <div style="margin-top: 25px">
@@ -48,7 +48,7 @@
     <el-card class="box-card">
       <el-table
         v-loading="data.loading"
-        :data="data.nodeList"
+        :data="data.tableData"
         stripe
         style="margin-top: 2px; width: 100%"
         :cell-style="{
@@ -59,7 +59,7 @@
         @selection-change="handleSelectionChange"
       >
         <!-- <el-table-column type="selection" width="30" /> -->
-        <el-table-column prop="metadata.name" sortable label="名称" width="180px">
+        <el-table-column prop="metadata.name" sortable label="名称">
           <template #default="scope">
             <el-link class="global-table-world" type="primary" @click="jumpRoute(scope.row)">
               {{ scope.row.metadata.name }}
@@ -71,17 +71,12 @@
         <el-table-column label="角色" prop="metadata" :formatter="formatRole"> </el-table-column>
         <el-table-column label="地址" prop="status" :formatter="formatIp"> </el-table-column>
         <el-table-column label="节点版本" prop="status.nodeInfo.kubeletVersion"> </el-table-column>
-        <el-table-column
-          label="运行时"
-          prop="status.nodeInfo.containerRuntimeVersion"
-          width="130px"
-        >
+        <el-table-column label="运行时" prop="status.nodeInfo.containerRuntimeVersion">
         </el-table-column>
 
         <el-table-column
           label="创建时间"
           prop="metadata.creationTimestamp"
-          width="150px"
           :formatter="formatterTime"
         >
         </el-table-column>
@@ -136,26 +131,19 @@
         </template>
       </el-table>
 
-      <el-pagination
-        v-model:currentPage="data.pageInfo.page"
-        v-model:page-size="data.pageInfo.page_size"
-        style="float: right; margin-right: 30px; margin-top: 20px; margin-bottom: 20px"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next, jumper"
-        :total="data.pageInfo.total"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
+      <pagination :total="data.pageInfo.total" @on-change="onChange"></pagination>
     </el-card>
   </div>
 </template>
 
 <script setup lang="jsx">
 import { useRouter } from 'vue-router';
-import { formatTimestamp } from '@/utils/utils';
 import { reactive, getCurrentInstance, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { formatTimestamp, getTableData } from '@/utils/utils';
 import PiXiuYaml from '@/components/pixiuyaml/index.vue';
+import Pagination from '@/components/pagination/index.vue';
+import { getNodeList } from '@/services/kubernetes/nodeService';
 
 const { proxy } = getCurrentInstance();
 const router = useRouter();
@@ -166,23 +154,13 @@ const data = reactive({
     page: 1,
     query: '',
     total: 0,
-    limit: 100,
+    limit: 10,
   },
-
+  tableData: [],
   loading: false,
 
   nodeList: [],
 });
-
-const handleSizeChange = (newSize) => {
-  data.pageInfo.limit = newSize;
-  getNodes();
-};
-
-const handleCurrentChange = (newPage) => {
-  data.pageInfo.page = newPage;
-  getNodes();
-};
 
 onMounted(() => {
   data.cluster = proxy.$route.query.cluster;
@@ -190,17 +168,25 @@ onMounted(() => {
   getNodes();
 });
 
+const onChange = (v) => {
+  data.pageInfo.limit = v.limit;
+  data.pageInfo.page = v.page;
+
+  data.tableData = getTableData(data.pageInfo, data.nodeList);
+};
+
 const getNodes = async () => {
   data.loading = true;
-  const res = await proxy.$http({
-    method: 'get',
-    url: `/proxy/pixiu/${data.cluster}/api/v1/nodes`,
-    data: data.pageInfo,
-  });
+  const [res, err] = await getNodeList(data.cluster);
   data.loading = false;
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
 
   data.nodeList = res.items;
   data.pageInfo.total = data.nodeList.length;
+  data.tableData = getTableData(data.pageInfo, data.nodeList);
 };
 
 const drain = (row) => {
@@ -213,7 +199,7 @@ const drain = (row) => {
     .then(async () => {
       // const res = await proxy.$http({
       //   method: 'delete',
-      //   url: `/proxy/pixiu/${data.cluster}/apis/apps/v1/namespaces/${data.namespace}/deployments/${row.metadata.name}`,
+      //   url: `/pixiu/proxy/${data.cluster}/apis/apps/v1/namespaces/${data.namespace}/deployments/${row.metadata.name}`,
       // });
       ElMessage({
         type: 'success',
@@ -254,7 +240,7 @@ const cordon = (row) => {
             unschedulable: true,
           },
         },
-        url: `/proxy/pixiu/${data.cluster}/api/v1/nodes/${row.metadata.name}`,
+        url: `/pixiu/proxy/${data.cluster}/api/v1/nodes/${row.metadata.name}`,
         config: {
           header: {
             'Content-Type': 'application/strategic-merge-patch+json',
@@ -290,7 +276,7 @@ const unCordon = (row) => {
             unschedulable: null,
           },
         },
-        url: `/proxy/pixiu/${data.cluster}/api/v1/nodes/${row.metadata.name}`,
+        url: `/pixiu/proxy/${data.cluster}/api/v1/nodes/${row.metadata.name}`,
         config: {
           header: {
             'Content-Type': 'application/strategic-merge-patch+json',
@@ -309,7 +295,11 @@ const unCordon = (row) => {
 
 const formatterTime = (row, column, cellValue) => {
   const time = formatTimestamp(cellValue);
-  return <div>{time}</div>;
+  return (
+    <el-tooltip effect="light" placement="top" content={time}>
+      <div class="pixiu-ellipsis-style">{time}</div>
+    </el-tooltip>
+  );
 };
 
 const formatStatus = (row, column, cellValue) => {

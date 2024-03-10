@@ -1,9 +1,22 @@
 import { ElMessage } from 'element-plus';
 import axios from 'axios';
+import $ from 'jquery';
 // import { router } from '@/router/index';
 
+let baseUrl = '';
+$.ajax({
+  type: 'get',
+  async: false,
+  url: './config.json',
+  data: {},
+  success: function (cfg) {
+    baseUrl = cfg.url;
+  },
+  error: function (err) {},
+});
+
 const instance = axios.create({
-  baseURL: import.meta.env.VITE_BASE_API, // 如果后端开放了cors，就可以用这个替代上面一行
+  baseURL: baseUrl ? baseUrl : import.meta.env.VITE_BASE_API, // 如果后端开放了cors，就可以用这个替代上面一行
   timeout: 6000, // 设置超时时间1分钟
   header: {
     'Content-Type': 'application/json;charset=UTF-8', // 基础的请求头
@@ -55,7 +68,11 @@ instance.interceptors.response.use(
   },
   (error) => {
     // 临时处理 k8s 的 get 请求，404 是正常回显，axios 会处理成异常
-    if (error.response.status !== 404 && error.response.status !== 422) {
+    if (
+      error.response.status !== 404 &&
+      error.response.status !== 422 &&
+      error.response.status !== 409
+    ) {
       ElMessage({
         message: error.message,
         type: 'error',

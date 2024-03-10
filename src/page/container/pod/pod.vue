@@ -1,7 +1,7 @@
 <template>
   <el-card class="title-card-container">
     <div class="font-container">Pod</div>
-    <PiXiuYaml></PiXiuYaml>
+    <PiXiuYaml :refresh="getPods"></PiXiuYaml>
   </el-card>
 
   <div style="margin-top: 25px">
@@ -49,7 +49,7 @@
       >
         <el-table-column type="selection" width="30" />
 
-        <el-table-column prop="metadata.name" sortable label="名称" min-width="80px">
+        <el-table-column prop="metadata.name" sortable label="名称" min-width="120px">
           <template #default="scope">
             <el-link class="global-table-world" type="primary" @click="jumpRoute(scope.row)">
               {{ scope.row.metadata.name }}
@@ -62,12 +62,12 @@
         <el-table-column
           prop="metadata.labels"
           label="Labels"
-          width="260"
+          min-width="200px"
           :formatter="formatterLabels"
         />
 
         <el-table-column prop="status.hostIP" label="所在节点" />
-        <el-table-column prop="status.podIP" label="实例IP">
+        <el-table-column prop="status.podIP" label="实例IP" min-width="100px">
           <template #default="scope">
             {{ scope.row.status.podIP }}
             <el-tooltip content="复制">
@@ -99,7 +99,7 @@
               size="small"
               type="text"
               style="margin-right: -25px; margin-left: -10px; color: #006eff"
-              @click="deletePod(scope.row)"
+              @click="handleDeleteDialog(scope.row)"
             >
               销毁重建
             </el-button>
@@ -120,28 +120,31 @@
         </template>
       </el-table>
 
-      <el-pagination
-        v-model:currentPage="data.pageInfo.page"
-        v-model:page-size="data.pageInfo.page_size"
-        style="float: right; margin-right: 30px; margin-top: 20px; margin-bottom: 20px"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next, jumper"
-        :total="data.pageInfo.total"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
+      <pagination :total="data.pageInfo.total" @on-change="onChange"></pagination>
     </el-card>
   </div>
+
+  <pixiuDialog
+    :close-event="data.deleteDialog.close"
+    :object-name="data.deleteDialog.objectName"
+    :delete-name="data.deleteDialog.deleteName"
+    @confirm="confirm"
+    @cancel="cancel"
+  ></pixiuDialog>
 </template>
 
 <script setup lang="jsx">
 import { useRouter } from 'vue-router';
 import { reactive, getCurrentInstance, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import useClipboard from 'vue-clipboard3';
 import PixiuTag from '@/components/pixiuTag/index.vue';
 import PiXiuYaml from '@/components/pixiuyaml/index.vue';
-import { formatTimestamp } from '@/utils/utils';
-import useClipboard from 'vue-clipboard3';
+import { formatTimestamp, getTableData } from '@/utils/utils';
+import Pagination from '@/components/pagination/index.vue';
+import { getNamespaceNames } from '@/services/kubernetes/namespaceService';
+import { getPodList, deletePod } from '@/services/kubernetes/podService';
+import pixiuDialog from '@/components/pixiuDialog/index.vue';
 
 const { toClipboard } = useClipboard();
 const { proxy } = getCurrentInstance();
@@ -159,6 +162,7 @@ const data = reactive({
     query: '',
     total: 0,
   },
+  tableData: [],
   loading: false,
 
   namespace: 'default',
@@ -166,34 +170,61 @@ const data = reactive({
   podList: [],
 
   podReplicasDialog: false,
-  podRepcliasFrom: {
-    name: '',
-    origin: '',
-    target: 0,
+
+  // 删除对象属性
+  deleteDialog: {
+    close: false,
+    objectName: 'Pod',
+    deleteName: '',
   },
 });
 
-const handleSizeChange = (newSize) => {
-  data.pageInfo.limit = newSize;
-  getPods();
-};
+const onChange = (v) => {
+  data.pageInfo.limit = v.limit;
+  data.pageInfo.page = v.page;
 
-const handleCurrentChange = (newPage) => {
-  data.pageInfo.page = newPage;
-  getPods();
-};
-
-const createPod = () => {
-  const url = `/kubernetes/pod_create?cluster=${data.cluster}&namespace=${data.namespace}`;
-  router.push(url);
+  data.tableData = getTableData(data.pageInfo, data.podList);
 };
 
 onMounted(() => {
   data.cluster = proxy.$route.query.cluster;
 
   getPods();
-  getNamespaceList();
+  getNamespaces();
 });
+
+const createPod = () => {
+  const url = `/pods/createPod?cluster=${data.cluster}`;
+  router.push(url);
+};
+
+const handleDeleteDialog = (row) => {
+  data.deleteDialog.close = true;
+  data.deleteDialog.deleteName = row.metadata.name;
+};
+
+const confirm = async () => {
+  const [result, err] = await deletePod(data.cluster, data.namespace, data.deleteDialog.deleteName);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  proxy.$message.success(
+    `${data.deleteDialog.objectName}(${data.deleteDialog.deleteName}) 删除成功`,
+  );
+
+  clean();
+  await getPods();
+};
+
+const cancel = () => {
+  clean();
+};
+
+const clean = () => {
+  data.deleteDialog.close = false;
+  data.deleteDialog.deleteName = '';
+};
 
 const jumpRoute = (row) => {
   router.push({
@@ -208,15 +239,16 @@ const jumpRoute = (row) => {
 
 const getPods = async () => {
   data.loading = true;
-  const res = await proxy.$http({
-    method: 'get',
-    url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/pods`,
-    data: data.pageInfo,
-  });
-
+  const [result, err] = await getPodList(data.cluster, data.namespace);
   data.loading = false;
-  data.podList = res.items;
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+
+  data.podList = result.items;
   data.pageInfo.total = data.podList.length;
+  data.tableData = getTableData(data.pageInfo, data.podList);
 };
 
 const changeNamespace = async (val) => {
@@ -226,39 +258,13 @@ const changeNamespace = async (val) => {
   getPods();
 };
 
-const getNamespaceList = async () => {
-  try {
-    const result = await proxy.$http({
-      method: 'get',
-      url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces`,
-    });
-
-    for (let item of result.items) {
-      data.namespaces.push(item.metadata.name);
-    }
-  } catch (error) {}
-};
-
-const deletePod = (row) => {
-  ElMessageBox.confirm('此操作将永久删除 ' + row.metadata.name + ' Pod. 是否继续?', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning',
-    draggable: true,
-  })
-    .then(async () => {
-      await proxy.$http({
-        method: 'delete',
-        url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/pods/${row.metadata.name}`,
-      });
-      ElMessage({
-        type: 'success',
-        message: '删除 ' + row.metadata.name + ' 成功',
-      });
-
-      await getPods();
-    })
-    .catch(() => {}); // 取消
+const getNamespaces = async () => {
+  const [result, err] = await getNamespaceNames(data.cluster);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  data.namespaces = result;
 };
 
 const copy = async (val) => {
@@ -324,49 +330,32 @@ const openWindowShell = () => {
   );
 };
 
-const closePodScaleDialog = (row) => {
-  data.podReplicasDialog = false;
-
-  data.podRepcliasFrom.name = '';
-  data.podRepcliasFrom.origin = '';
-  data.podRepcliasFrom.target = 0;
-};
-
-const confirmPodScale = () => {
-  try {
-    const res = proxy.$http({
-      method: 'patch',
-      url: `/proxy/pixiu/${data.cluster}/apis/apps/v1/namespaces/${data.namespace}/pods/${data.podRepcliasFrom.name}/scale`,
-      data: {
-        spec: {
-          replicas: Number(data.podRepcliasFrom.target),
-        },
-      },
-      config: {
-        header: {
-          'Content-Type': 'application/merge-patch+json',
-        },
-      },
-    });
-    getPods();
-    getPods();
-    closePodScaleDialog();
-  } catch (error) {}
-};
-
 const formatterLabels = (row, column, cellValue) => {
-  if (!cellValue) return <div>None</div>;
+  if (!cellValue) return <div>-</div>;
   const labels = Object.entries(cellValue).map(([key, value]) => {
     return `${key}: ${value}`;
   });
 
-  return (
+  let labels1 = labels;
+  if (labels1.length > 2) {
+    labels1 = labels1.slice(0, 2);
+    labels1.push('...');
+  }
+
+  const displayContent = `
     <div>
-      {' '}
-      {labels.map((label) => (
-        <div class="pixiu-table-formatter">{label}</div>
-      ))}{' '}
+      ${labels.map((label) => `<div class="pixiu-table-formatter">${label}</div>`).join('')}
     </div>
+  `;
+
+  return (
+    <el-tooltip effect="light" placement="top" content={displayContent.toString()} raw-content>
+      <div>
+        {labels1.map((label) => (
+          <div class="pixiu-ellipsis-style">{label}</div>
+        ))}
+      </div>
+    </el-tooltip>
   );
 };
 
@@ -482,7 +471,11 @@ const formatterRestartNumber = (row, column, status) => {
 
 const formatterTime = (row, column, cellValue) => {
   const time = formatTimestamp(cellValue);
-  return <div>{time}</div>;
+  return (
+    <el-tooltip effect="light" placement="top" content={time}>
+      <div class="pixiu-ellipsis-style">{time}</div>
+    </el-tooltip>
+  );
 };
 </script>
 

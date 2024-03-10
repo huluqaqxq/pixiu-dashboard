@@ -1,7 +1,7 @@
 <template>
   <el-card class="title-card-container">
     <div class="font-container">Release</div>
-    <PiXiuYaml></PiXiuYaml>
+    <PiXiuYaml :refresh="getReleases"></PiXiuYaml>
   </el-card>
 
   <div style="margin-top: 25px">
@@ -39,7 +39,7 @@
     <el-card class="box-card">
       <el-table
         v-loading="data.loading"
-        :data="data.releasesList"
+        :data="data.tableData"
         stripe
         style="margin-top: 2px; width: 100%"
         header-row-class-name="pixiu-table-header"
@@ -127,26 +127,19 @@
         </template>
       </el-table>
 
-      <el-pagination
-        v-model:currentPage="data.pageInfo.page"
-        v-model:page-size="data.pageInfo.page_size"
-        style="float: right; margin-right: 30px; margin-top: 20px; margin-bottom: 20px"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next, jumper"
-        :total="data.pageInfo.total"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
+      <pagination :total="data.pageInfo.total" @on-change="onChange"></pagination>
     </el-card>
   </div>
 </template>
 
 <script setup>
 import { useRouter } from 'vue-router';
-import { formatTimestamp } from '@/utils/utils';
 import { reactive, getCurrentInstance, onMounted } from 'vue';
+import { formatTimestamp, getTableData } from '@/utils/utils';
 import PiXiuYaml from '@/components/pixiuyaml/index.vue';
-
+import Pagination from '@/components/pagination/index.vue';
+import { getNamespaceNames } from '@/services/kubernetes/namespaceService';
+import { getReleaseList } from '@/services/kubernetes/releaseService';
 const { proxy } = getCurrentInstance();
 const router = useRouter();
 
@@ -158,6 +151,7 @@ const data = reactive({
     query: '',
     total: 0,
   },
+  tableData: [],
   loading: false,
 
   namespace: 'default',
@@ -172,21 +166,19 @@ const data = reactive({
   },
 });
 
-const handleSizeChange = (newSize) => {
-  data.pageInfo.limit = newSize;
-  getReleases();
-};
-
-const handleCurrentChange = (newPage) => {
-  data.pageInfo.page = newPage;
-  getReleases();
-};
-
 onMounted(() => {
   data.cluster = proxy.$route.query.cluster;
+
   getReleases();
-  getNamespaceList();
+  getNamespaces();
 });
+
+const onChange = (v) => {
+  data.pageInfo.limit = v.limit;
+  data.pageInfo.page = v.page;
+
+  getReleases();
+};
 
 const jumpRoute = (row) => {
   router.push({
@@ -200,17 +192,17 @@ const jumpRoute = (row) => {
 
 const getReleases = async () => {
   data.loading = true;
-  const res = await proxy.$http({
-    method: 'get',
-    url: `/pixiu/helms/clusters/${data.cluster}/v1/namespaces/${data.namespace}/releases`,
-    data: data.pageInfo,
-  });
+  const [result, err] = await getReleaseList(data.cluster, data.namespace);
+  data.loading = false;
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
 
   data.loading = false;
-  data.releasesList = res;
-  if (res) {
-    data.pageInfo.total = data.releasesList.length;
-  }
+  data.releasesList = result.result;
+  data.pageInfo.total = data.releasesList.length;
+  data.tableData = getTableData(data.pageInfo, data.releasesList);
 };
 
 const deleteRelease = async (val) => {};
@@ -221,17 +213,13 @@ const changeNamespace = async (val) => {
   getReleases();
 };
 
-const getNamespaceList = async () => {
-  try {
-    const result = await proxy.$http({
-      method: 'get',
-      url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces`,
-    });
-
-    for (let item of result.items) {
-      data.namespaces.push(item.metadata.name);
-    }
-  } catch (error) {}
+const getNamespaces = async () => {
+  const [result, err] = await getNamespaceNames(data.cluster);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  data.namespaces = result;
 };
 </script>
 

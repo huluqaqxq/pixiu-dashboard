@@ -1,7 +1,7 @@
 <template>
   <el-card class="title-card-container">
     <div class="font-container">命名空间</div>
-    <PiXiuYaml></PiXiuYaml>
+    <PiXiuYaml :refresh="getNamespace"></PiXiuYaml>
   </el-card>
 
   <div style="margin-top: 25px">
@@ -30,7 +30,7 @@
     <el-card class="box-card">
       <el-table
         v-loading="data.loading"
-        :data="data.namespaceList"
+        :data="data.tableData"
         stripe
         style="margin-top: 2px; width: 100%"
         :cell-style="{
@@ -92,7 +92,7 @@
               type="text"
               size="small"
               style="margin-right: 1px; color: #006eff"
-              @click="deleteNamespace(scope.row)"
+              @click="handleDeleteDialog(scope.row)"
             >
               删除
             </el-button>
@@ -103,29 +103,29 @@
           <div class="table-inline-word">命名空间的列表为空</div>
         </template>
       </el-table>
-
-      <el-pagination
-        v-model:currentPage="data.pageInfo.page"
-        v-model:page-size="data.pageInfo.page_size"
-        style="float: right; margin-right: 30px; margin-top: 20px; margin-bottom: 20px"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next, jumper"
-        :total="data.pageInfo.total"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
+      <pagination :total="data.pageInfo.total" @on-change="onChange"></pagination>
     </el-card>
   </div>
+
+  <pixiuDialog
+    :close-event="data.deleteDialog.close"
+    :object-name="data.deleteDialog.objectName"
+    :delete-name="data.deleteDialog.deleteName"
+    @confirm="confirm"
+    @cancel="cancel"
+  ></pixiuDialog>
 </template>
 
 <script setup lang="jsx">
 import { useRouter } from 'vue-router';
-import { formatTimestamp } from '@/utils/utils';
+import { formatTimestamp, getTableData } from '@/utils/utils';
 import { reactive, getCurrentInstance, onMounted } from 'vue';
-import { getNamespaces } from '@/services/cloudService';
+import { getNamespaceList, deleteNamespace } from '@/services/kubernetes/namespaceService';
 import useClipboard from 'vue-clipboard3';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import PiXiuYaml from '@/components/pixiuyaml/index.vue';
+import Pagination from '@/components/pagination/index.vue';
+import pixiuDialog from '@/components/pixiuDialog/index.vue';
 
 const { proxy } = getCurrentInstance();
 const router = useRouter();
@@ -136,13 +136,58 @@ const data = reactive({
     page: 1,
     query: '',
     total: 0,
-    limit: 100,
+    limit: 10,
   },
-
+  tableData: [],
   loading: false,
-
   namespaceList: [],
+
+  // 删除对象属性
+  deleteDialog: {
+    close: false,
+    objectName: '命名空间',
+    deleteName: '',
+  },
 });
+
+onMounted(() => {
+  data.cluster = proxy.$route.query.cluster;
+
+  getNamespace();
+});
+
+const handleDeleteDialog = (row) => {
+  data.deleteDialog.close = true;
+  data.deleteDialog.deleteName = row.metadata.name;
+};
+
+const confirm = async () => {
+  const [result, err] = await deleteNamespace(data.cluster, data.deleteDialog.deleteName);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  proxy.$message.success(`Namespace(${data.deleteDialog.deleteName}) 删除成功`);
+
+  clean();
+  getNamespace();
+};
+
+const cancel = () => {
+  clean();
+};
+
+const clean = () => {
+  data.deleteDialog.close = false;
+  data.deleteDialog.deleteName = '';
+};
+
+const onChange = (v) => {
+  data.pageInfo.limit = v.limit;
+  data.pageInfo.page = v.page;
+
+  data.tableData = getTableData(data.pageInfo, data.namespaceList);
+};
 
 const { toClipboard } = useClipboard();
 const copy = async (val) => {
@@ -160,37 +205,23 @@ const copy = async (val) => {
   }
 };
 
-const handleSizeChange = (newSize) => {
-  data.pageInfo.limit = newSize;
-  getNamespace();
-};
-
-const handleCurrentChange = (newPage) => {
-  data.pageInfo.page = newPage;
-  getNamespace();
-};
-
-onMounted(() => {
-  data.cluster = proxy.$route.query.cluster;
-
-  getNamespace();
-});
-
 const createNamespace = () => {
-  const url = `/kubernetes/createNamespace?cluster=${data.cluster}`;
+  const url = `/namespaces/createNamespace?cluster=${data.cluster}`;
   router.push(url);
 };
 
 const getNamespace = async () => {
   data.loading = true;
-  const [err, result] = await getNamespaces(data.cluster);
+  const [result, err] = await getNamespaceList(data.cluster);
+  data.loading = false;
   if (err) {
+    proxy.$message.error(err.response.data.message);
     return;
   }
-  data.loading = false;
 
   data.namespaceList = result.items;
   data.pageInfo.total = data.namespaceList.length;
+  data.tableData = getTableData(data.pageInfo, data.namespaceList);
 };
 
 const jumpNamespaceRoute = (row) => {
@@ -203,31 +234,13 @@ const jumpNamespaceRoute = (row) => {
   });
 };
 
-const deleteNamespace = (row) => {
-  ElMessageBox.confirm('此操作将永久删除 ' + row.metadata.name + ' 命名空间. 是否继续?', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning',
-    draggable: true,
-  })
-    .then(async () => {
-      const res = await proxy.$http({
-        method: 'delete',
-        url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${row.metadata.name}`,
-      });
-      ElMessage({
-        type: 'success',
-        message: '删除 ' + row.metadata.name + ' 成功',
-      });
-
-      getNamespace();
-    })
-    .catch(() => {}); // 取消
-};
-
 const formatterTime = (row, column, cellValue) => {
   const time = formatTimestamp(cellValue);
-  return <div>{time}</div>;
+  return (
+    <el-tooltip effect="light" placement="top" content={time}>
+      <div class="pixiu-ellipsis-style">{time}</div>
+    </el-tooltip>
+  );
 };
 
 const formatStatus = (row, column, cellValue) => {

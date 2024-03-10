@@ -1,7 +1,7 @@
 <template>
   <el-card class="title-card-container">
     <div class="font-container">Service</div>
-    <PiXiuYaml></PiXiuYaml>
+    <PiXiuYaml :refresh="getServices"></PiXiuYaml>
   </el-card>
 
   <div style="margin-top: 25px">
@@ -38,7 +38,7 @@
     <el-card class="box-card">
       <el-table
         v-loading="data.loading"
-        :data="data.serviceList"
+        :data="data.tableData"
         stripe
         style="margin-top: 2px; width: 100%"
         :cell-style="{
@@ -68,7 +68,7 @@
         >
         </el-table-column>
 
-        <el-table-column fixed="right" label="操作" width="150">
+        <el-table-column fixed="right" label="操作" width="170px">
           <template #default="scope">
             <el-button
               size="small"
@@ -76,16 +76,24 @@
               style="margin-right: -20px; margin-left: -10px; color: #006eff"
               @click="editService(scope.row)"
             >
-              编辑
+              设置
             </el-button>
 
             <el-button
               type="text"
               size="small"
-              style="margin-right: 1px; color: #006eff"
-              @click="deleteService(scope.row)"
+              style="margin-right: -25px; margin-left: 8px; color: #006eff"
+              @click="handleDeleteDialog(scope.row)"
             >
               删除
+            </el-button>
+            <el-button
+              type="text"
+              size="small"
+              style="margin-right: 1px; color: #006eff"
+              @click="handleEditYamlDialog(scope.row)"
+            >
+              YAML 设置
             </el-button>
           </template>
         </el-table-column>
@@ -95,30 +103,62 @@
         </template>
       </el-table>
 
-      <el-pagination
-        v-model:currentPage="data.pageInfo.page"
-        v-model:page-size="data.pageInfo.page_size"
-        style="float: right; margin-right: 30px; margin-top: 20px; margin-bottom: 20px"
-        :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next, jumper"
-        :total="data.pageInfo.total"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
+      <pagination :total="data.pageInfo.total" @on-change="onChange"></pagination>
     </el-card>
   </div>
+
+  <!-- 编辑 yaml 页面 -->
+  <el-dialog
+    :model-value="data.editYamlDialog"
+    style="color: #000000; font: 14px; margin-top: 50px"
+    width="800px"
+    center
+    @close="closeEditYamlDialog"
+  >
+    <template #header>
+      <div style="text-align: left; font-weight: bold; padding-left: 5px">YAML 设置</div>
+    </template>
+    <div style="margin-top: -18px"></div>
+    <MyCodeMirror ref="editYaml" :yaml="data.yaml" :height="650"></MyCodeMirror>
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button class="pixiu-small-cancel-button" @click="closeEditYamlDialog">取消</el-button>
+        <el-button type="primary" class="pixiu-small-confirm-button" @click="confirmEditYaml"
+          >确认</el-button
+        >
+      </span>
+    </template>
+  </el-dialog>
+
+  <pixiuDialog
+    :close-event="data.deleteDialog.close"
+    :object-name="data.deleteDialog.objectName"
+    :delete-name="data.deleteDialog.deleteName"
+    @confirm="confirm"
+    @cancel="cancel"
+  ></pixiuDialog>
 </template>
 
 <script setup lang="jsx">
 import { useRouter } from 'vue-router';
-import { formatTimestamp } from '@/utils/utils';
-import { reactive, getCurrentInstance, onMounted } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import { getNamespaces } from '@/services/cloudService';
+import { formatTimestamp, getTableData } from '@/utils/utils';
+import { reactive, getCurrentInstance, onMounted, ref } from 'vue';
+import jsYaml from 'js-yaml';
+import { getNamespaceNames } from '@/services/kubernetes/namespaceService';
+import MyCodeMirror from '@/components/codemirror/index.vue';
+import {
+  getServiceList,
+  updateService,
+  getService,
+  deleteService,
+} from '@/services/kubernetes/serviceService';
 import PiXiuYaml from '@/components/pixiuyaml/index.vue';
+import Pagination from '@/components/pagination/index.vue';
+import pixiuDialog from '@/components/pixiuDialog/index.vue';
 
 const { proxy } = getCurrentInstance();
 const router = useRouter();
+const editYaml = ref();
 
 const data = reactive({
   cluster: '',
@@ -126,53 +166,127 @@ const data = reactive({
     page: 1,
     query: '',
     total: 0,
-    limit: 100,
+    limit: 10,
   },
+  tableData: [],
   loading: false,
 
   namespace: 'default',
   namespaces: [],
   serviceList: [],
+
+  //  yaml相关属性
+  yaml: '',
+  yamlName: '',
+  editYamlDialog: false,
+
+  // 删除对象属性
+  deleteDialog: {
+    close: false,
+    objectName: 'Service',
+    deleteName: '',
+  },
 });
-
-const handleSizeChange = (newSize) => {
-  data.pageInfo.limit = newSize;
-  getServices();
-};
-
-const handleCurrentChange = (newPage) => {
-  data.pageInfo.page = newPage;
-  getServices();
-};
-
-const createService = () => {
-  const url = `/kubernetes/services/createService?cluster=${data.cluster}&namespace=${data.namespace}`;
-  router.push(url);
-};
-
-const editService = (row) => {
-  const url = `/kubernetes/services/editService?cluster=${data.cluster}&namespace=${data.namespace}&name=${row.metadata.name}`;
-  router.push(url);
-};
 
 onMounted(() => {
   data.cluster = proxy.$route.query.cluster;
 
   getServices();
-  getNamespaceList();
+  getNamespaces();
 });
+
+const handleDeleteDialog = (row) => {
+  data.deleteDialog.close = true;
+  data.deleteDialog.deleteName = row.metadata.name;
+};
+
+const confirm = async () => {
+  const [result, err] = await deleteService(
+    data.cluster,
+    data.namespace,
+    data.deleteDialog.deleteName,
+  );
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  proxy.$message.success(
+    `${data.deleteDialog.objectName}(${data.deleteDialog.deleteName}) 删除成功`,
+  );
+
+  clean();
+  await getServices();
+};
+
+const cancel = () => {
+  clean();
+};
+
+const clean = () => {
+  data.deleteDialog.close = false;
+  data.deleteDialog.deleteName = '';
+};
+
+const onChange = (v) => {
+  data.pageInfo.limit = v.limit;
+  data.pageInfo.page = v.page;
+
+  data.tableData = getTableData(data.pageInfo, data.serviceList);
+};
+
+const createService = () => {
+  const url = `/services/createService?cluster=${data.cluster}`;
+  router.push(url);
+};
+
+const editService = (row) => {
+  const url = `/services/editService?cluster=${data.cluster}&namespace=${data.namespace}&name=${row.metadata.name}`;
+  router.push(url);
+};
+
+const handleEditYamlDialog = async (row) => {
+  data.yamlName = row.metadata.name;
+  const [result, err] = await getService(data.cluster, data.namespace, data.yamlName);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+
+  data.yaml = jsYaml.dump(result);
+  data.editYamlDialog = true;
+};
+
+const closeEditYamlDialog = (row) => {
+  data.yaml = '';
+  data.yamlName = '';
+  data.editYamlDialog = false;
+};
+
+const confirmEditYaml = async () => {
+  const yamlData = jsYaml.load(editYaml.value.code);
+  const [result, err] = await updateService(data.cluster, data.namespace, data.yamlName, yamlData);
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+  proxy.$message.success(`Service(${data.yamlName}) YAML 更新成功`);
+
+  closeEditYamlDialog();
+  await getServices();
+};
 
 const getServices = async () => {
   data.loading = true;
-  const res = await proxy.$http({
-    method: 'get',
-    url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/services`,
-    data: data.pageInfo,
-  });
-
+  const [result, err] = await getServiceList(data.cluster, data.namespace);
   data.loading = false;
-  data.serviceList = res.items;
+  if (err) {
+    proxy.$message.error(err.response.data.message);
+    return;
+  }
+
+  data.serviceList = result.items;
   data.pageInfo.total = data.serviceList.length;
+  data.tableData = getTableData(data.pageInfo, data.serviceList);
 };
 
 const changeNamespace = async (val) => {
@@ -182,42 +296,22 @@ const changeNamespace = async (val) => {
   getServices();
 };
 
-const getNamespaceList = async () => {
-  const [err, result] = await getNamespaces(data.cluster);
+const getNamespaces = async () => {
+  const [result, err] = await getNamespaceNames(data.cluster);
   if (err) {
+    proxy.$message.error(err.response.data.message);
     return;
   }
-
-  for (let item of result.items) {
-    data.namespaces.push(item.metadata.name);
-  }
-};
-
-const deleteService = (row) => {
-  ElMessageBox.confirm('此操作将永久删除 ' + row.metadata.name + 'Service . 是否继续?', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning',
-    draggable: true,
-  })
-    .then(async () => {
-      await proxy.$http({
-        method: 'delete',
-        url: `/proxy/pixiu/${data.cluster}/api/v1/namespaces/${data.namespace}/services/${row.metadata.name}`,
-      });
-      ElMessage({
-        type: 'success',
-        message: '删除 ' + row.metadata.name + ' 成功',
-      });
-
-      await getServices();
-    })
-    .catch(() => {}); // 取消
+  data.namespaces = result;
 };
 
 const formatterTime = (row, column, cellValue) => {
   const time = formatTimestamp(cellValue);
-  return <div>{time}</div>;
+  return (
+    <el-tooltip effect="light" placement="top" content={time}>
+      <div class="pixiu-ellipsis-style">{time}</div>
+    </el-tooltip>
+  );
 };
 
 const formatterPorts = (row, column, cellValue) => {
