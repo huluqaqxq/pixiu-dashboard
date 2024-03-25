@@ -14,12 +14,23 @@
 
         <el-input
           v-model="data.pageInfo.search.searchInfo"
-          placeholder="名称搜索关键字"
+          placeholder="Name: 关键字，Label: key1=value1,key2=value2"
           style="width: 400px; float: right"
+          class="input-select-style"
           clearable
           @clear="getDeployments"
           @input="searchDeployments"
         >
+          <template #prefix>
+            <el-select
+              v-model="data.pageInfo.search.field"
+              class="select-no-arrow"
+              style="width: 50px"
+            >
+              <el-option label="名称" value="name" />
+              <el-option label="标签" value="label" />
+            </el-select>
+          </template>
           <template #suffix>
             <pixiu-icon
               name="icon-search"
@@ -66,13 +77,18 @@
 
         <el-table-column prop="metadata.name" sortable label="名称">
           <template #default="scope">
-            <el-link class="global-table-world" type="primary" @click="jumpRoute(scope.row)">
+            <el-link
+              class="global-table-world"
+              type="primary"
+              :underline="false"
+              @click="jumpRoute(scope.row)"
+            >
               {{ scope.row.metadata.name }}
             </el-link>
           </template>
         </el-table-column>
 
-        <el-table-column
+        <!-- <el-table-column
           prop="spec.template.metadata.labels"
           label="Labels"
           :formatter="formatterLabels"
@@ -83,42 +99,58 @@
           label="Selector"
           :formatter="formatterLabels"
         >
+        </el-table-column> -->
+
+        <el-table-column prop="status" label="状态" :formatter="runningFormatter">
         </el-table-column>
 
-        <el-table-column prop="status" label="Pod状态" :formatter="formatterReady" width="90px">
+        <el-table-column prop="status" label="实例个数(正常/全部)">
+          <template #default="scope">
+            <div style="display: flex">
+              {{ getDeployReady(scope.row) }}
+
+              <div style="margin-left: 8px; cursor: pointer">
+                <pixiu-icon
+                  name="icon-edit"
+                  size="12px"
+                  type="iconfont"
+                  color="#909399"
+                  @click="handleDeploymentScaleDialog(scope.row)"
+                />
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="metadata.namespace" label="命名空间" :formatter="formatterNamespace">
         </el-table-column>
 
         <el-table-column
           prop="metadata.creationTimestamp"
           label="创建时间"
+          sortable
           :formatter="formatterTime"
         />
 
-        <!-- <el-table-column
-          label="镜像"
+        <el-table-column
+          label="镜像名称"
           prop="spec.template.spec.containers"
           :formatter="formatterImage"
         >
-        </el-table-column> -->
+        </el-table-column>
 
-        <el-table-column fixed="right" label="操作" width="180">
+        <el-table-column fixed="right" label="操作" width="150px">
           <template #default="scope">
             <el-button
               size="small"
               type="text"
-              style="margin-right: -20px; margin-left: -10px; color: #006eff"
-              @click="editDeployment(scope.row)"
+              style="margin-right: -25px; margin-left: -10px; color: #006eff"
             >
-              编辑
+              监控
             </el-button>
 
-            <el-button
-              type="text"
-              size="small"
-              style="margin-right: 1px; color: #006eff"
-              @click="handleDeploymentScaleDialog(scope.row)"
-            >
-              调整副本数
+            <el-button type="text" size="small" style="margin-right: -2px; color: #006eff">
+              日志
             </el-button>
 
             <el-dropdown>
@@ -158,12 +190,12 @@
   <el-dialog
     :model-value="data.deploymentReplicasDialog"
     style="color: #000000; font: 14px"
-    width="500px"
+    width="420px"
     center
     @close="closeDeploymentScaleDialog"
   >
     <template #header>
-      <div style="text-align: left; font-weight: bold; padding-left: 5px">调整副本配置</div>
+      <div style="text-align: left; font-weight: bold; padding-left: 5px">调整实例数</div>
     </template>
 
     <el-form label-width="100px" style="max-width: 300px">
@@ -175,8 +207,7 @@
       </el-form-item>
     </el-form>
 
-    <div style="margin-top: -18px"></div>
-
+    <div style="margin-top: -25px"></div>
     <template #footer>
       <span class="dialog-footer">
         <el-button class="pixiu-small-cancel-button" @click="closeDeploymentScaleDialog"
@@ -235,7 +266,12 @@ import {
   updateDeployment,
   deleteDeployment,
 } from '@/services/kubernetes/deploymentService';
-import { formatterImage, formatterTime, formatterLabels, formatterReady } from '@/utils/formatter';
+import {
+  formatterImage,
+  formatterTime,
+  formatterNamespace,
+  runningFormatter,
+} from '@/utils/formatter';
 import MyCodeMirror from '@/components/codemirror/index.vue';
 import Pagination from '@/components/pagination/index.vue';
 import pixiuDialog from '@/components/pixiuDialog/index.vue';
@@ -246,6 +282,7 @@ const editYaml = ref();
 
 const data = reactive({
   cluster: '',
+
   pageInfo: {
     page: 1,
     limit: 10,
@@ -304,6 +341,15 @@ const filterMethod = (f) => {
       data.filterNamespaces.push(item);
     }
   }
+};
+
+const getDeployReady = (row) => {
+  let availableReplicas = row.status.availableReplicas;
+  if (availableReplicas === undefined) {
+    availableReplicas = 0;
+  }
+
+  return availableReplicas + '/' + row.spec.replicas;
 };
 
 const handleDeleteDialog = (row) => {
@@ -476,7 +522,7 @@ const confirmDeploymentScale = async () => {
 };
 </script>
 
-<style scoped="scoped">
+<style>
 .font-container {
   margin-top: -5px;
   font-weight: bold;
