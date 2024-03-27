@@ -51,36 +51,30 @@
         header-row-class-name="pixiu-table-header"
         :cell-style="{
           'font-size': '12px',
-          color: '#29292b',
+          color: '#191919',
         }"
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="30" />
-
-        <el-table-column prop="metadata.name" sortable label="名称" min-width="120px">
+        <el-table-column prop="metadata.name" sortable label="实例名称" min-width="100px">
           <template #default="scope">
-            <el-link
-              class="global-table-world"
-              :underline="false"
-              type="primary"
-              @click="jumpRoute(scope.row)"
-            >
-              <span class="name-text-line">{{ scope.row.metadata.name }}</span>
-            </el-link>
+            {{ scope.row.metadata.name }}
           </template>
         </el-table-column>
 
         <el-table-column prop="status" label="状态" :formatter="formatterPodStatus" />
 
-        <el-table-column
+        <el-table-column prop="metadata.namespace" label="命名空间" :formatter="formatterNamespace">
+        </el-table-column>
+
+        <!-- <el-table-column
           prop="metadata.labels"
           label="Labels"
           min-width="200px"
           :formatter="formatterLabels"
-        />
+        /> -->
 
-        <el-table-column prop="status.hostIP" label="所在节点" />
-        <el-table-column prop="status.podIP" label="实例IP" min-width="100px">
+        <!-- <el-table-column prop="status.podIP" label="实例IP">
           <template #default="scope">
             {{ scope.row.status.podIP }}
             <el-tooltip content="复制">
@@ -95,7 +89,10 @@
             </el-tooltip>
           </template>
         </el-table-column>
-        />
+        /> -->
+
+        <el-table-column prop="status.podIP" label="实例IP"> </el-table-column>
+        <el-table-column prop="status.hostIP" label="所在节点"></el-table-column>
         <el-table-column prop="status" label="重启次数" :formatter="formatterRestartCount" />
 
         <!-- <el-table-column label="镜像" prop="spec.containers" :formatter="formatterImage" /> -->
@@ -106,25 +103,44 @@
           :formatter="formatterTime"
         />
 
-        <el-table-column fixed="right" label="操作" width="160px">
+        <el-table-column fixed="right" label="操作" width="150px">
           <template #default="scope">
             <el-button
               size="small"
               type="text"
               style="margin-right: -25px; margin-left: -10px; color: #006eff"
-              @click="handleDeleteDialog(scope.row)"
             >
-              删除Pod
+              监控
             </el-button>
 
-            <el-button
-              type="text"
-              size="small"
-              style="color: #006eff"
-              @click="openShell(scope.row)"
-            >
-              远程登陆
-            </el-button>
+            <el-button type="text" size="small" style="color: #006eff"> 事件 </el-button>
+
+            <el-dropdown>
+              <span class="el-dropdown-link">
+                更多
+                <pixiu-icon name="icon-xiala" size="12px" type="iconfont" color="#006eff" />
+              </span>
+              <template #dropdown>
+                <el-dropdown-menu class="dropdown-buttons">
+                  <el-dropdown-item class="dropdown-item-buttons"> 日志 </el-dropdown-item>
+                  <el-dropdown-item
+                    class="dropdown-item-buttons"
+                    @click="handleRemoteLoginDialog(scope.row)"
+                  >
+                    远程登陆
+                  </el-dropdown-item>
+                  <el-dropdown-item class="dropdown-item-buttons"> 详情 </el-dropdown-item>
+                  <el-dropdown-item class="dropdown-item-buttons"> 容器列表 </el-dropdown-item>
+                  <el-dropdown-item class="dropdown-item-buttons"> 查看YAML </el-dropdown-item>
+                  <el-dropdown-item
+                    class="dropdown-item-buttons"
+                    @click="handleDeleteDialog(scope.row)"
+                  >
+                    删除
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
 
@@ -144,6 +160,73 @@
     @confirm="confirm"
     @cancel="cancel"
   ></pixiuDialog>
+
+  <el-dialog
+    :model-value="data.remoteLogin.close"
+    style="color: #000000; font: 14px"
+    width="500px"
+    align-center
+    center
+    @close="cancelRemoteLogin"
+  >
+    <template #header>
+      <div
+        style="
+          text-align: left;
+          font-weight: bold;
+          padding-left: 5px;
+          margin-top: 5px;
+          font-size: 14.5px;
+          color: #191919;
+        "
+      >
+        远程登录
+      </div>
+    </template>
+
+    <el-card class="app-docs" style="margin-top: -10px; height: 40px">
+      <el-icon
+        style="vertical-align: middle; font-size: 16px; margin-left: -25px; margin-top: -50px"
+        ><WarningFilled
+      /></el-icon>
+      <div style="vertical-align: middle; margin-top: -40px">基于 WebShell 提供登陆容器的功能</div>
+    </el-card>
+
+    <el-form>
+      <el-form-item label="容器名称">
+        <el-select
+          v-model="data.remoteLogin.container"
+          style="margin-left: 25px; width: 300px"
+          @change="changeContainer"
+        >
+          <el-option
+            v-for="item in data.remoteLogin.containers"
+            :key="item"
+            :value="item"
+            :label="item"
+          />
+        </el-select>
+      </el-form-item>
+
+      <el-form-item label="Command">
+        <el-radio-group v-model="data.remoteLogin.command" style="margin-left: 15px">
+          <el-radio label="/bin/sh">/bin/sh</el-radio>
+          <el-radio label="/bin/bash">/bin/bash</el-radio>
+        </el-radio-group>
+      </el-form-item>
+    </el-form>
+    <div style="margin-top: -25px" />
+
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button class="pixiu-delete-cancel-button" @click="cancelRemoteLogin">取消</el-button>
+        <el-button type="primary" class="pixiu-delete-confirm-button" @click="confirmRemoteLogin"
+          >确认</el-button
+        >
+      </span>
+      <div style="margin-bottom: 10px" />
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="jsx">
@@ -151,15 +234,13 @@ import { useRouter } from 'vue-router';
 import { reactive, getCurrentInstance, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import useClipboard from 'vue-clipboard3';
-import PixiuTag from '@/components/pixiuTag/index.vue';
 import PiXiuYaml from '@/components/pixiuyaml/index.vue';
 import { getTableData, searchData } from '@/utils/utils';
 import {
   formatterTime,
   formatterPodStatus,
-  formatterImage,
-  formatterLabels,
   formatterRestartCount,
+  formatterNamespace,
 } from '@/utils/formatter';
 import Pagination from '@/components/pagination/index.vue';
 import { getNamespaceNames } from '@/services/kubernetes/namespaceService';
@@ -204,6 +285,14 @@ const data = reactive({
     objectName: 'Pod',
     deleteName: '',
   },
+
+  remoteLogin: {
+    close: false,
+    pod: '',
+    container: '',
+    containers: [],
+    command: '/bin/sh',
+  },
 });
 
 const onChange = (v) => {
@@ -232,6 +321,44 @@ const createPod = () => {
 const handleDeleteDialog = (row) => {
   data.deleteDialog.close = true;
   data.deleteDialog.deleteName = row.metadata.name;
+};
+
+const cancelRemoteLogin = () => {
+  data.remoteLogin.close = false;
+  data.remoteLogin.container = '';
+  data.remoteLogin.containers = [];
+  data.remoteLogin.pod = '';
+  data.remoteLogin.command = '/bin/sh';
+};
+
+const confirmRemoteLogin = () => {
+  window.open(
+    '/#/podshell?pod=' +
+      data.remoteLogin.pod +
+      '&namespace=' +
+      data.namespace +
+      '&cluster=' +
+      data.cluster +
+      '&container=' +
+      data.remoteLogin.container +
+      '&command=' +
+      data.remoteLogin.command,
+    '_blank',
+    'width=1000,height=600',
+  );
+  cancelRemoteLogin();
+};
+
+const handleRemoteLoginDialog = (row) => {
+  data.remoteLogin.close = true;
+  data.remoteLogin.pod = row.metadata.name;
+  data.remoteLogin.containers = [];
+  for (let c of row.spec.containers) {
+    data.remoteLogin.containers.push(c.name);
+  }
+  if (data.remoteLogin.containers.length >= 1) {
+    data.remoteLogin.container = data.remoteLogin.containers[0];
+  }
 };
 
 const confirm = async () => {
@@ -389,13 +516,6 @@ const openWindowShell = () => {
 </script>
 
 <style scoped="scoped">
-.font-container {
-  margin-top: -5px;
-  font-weight: bold;
-  font-size: 16px;
-  vertical-align: middle;
-}
-
 .namespace-container {
   font-size: 14px;
   margin-top: -2px;
